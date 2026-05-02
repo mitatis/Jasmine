@@ -9,6 +9,12 @@ import type {
   Seller,
   StyleAnalysis,
 } from "@/lib/types";
+import {
+  generatedBloggers,
+  generatedPosts,
+  generatedProducts,
+  generatedRequests,
+} from "@/lib/generated-mock-market";
 
 const demoImages = {
   postUrbanBlack: "/generated/seedream-v1/post-urban-black.jpg",
@@ -73,6 +79,63 @@ export const seedSellers: Seller[] = [
     revenue: 0,
     followerCount: 710,
     styleFocus: "韩系宽松",
+  },
+];
+
+export const generatedSellers: Seller[] = [
+  {
+    id: "seller-clean",
+    name: "鹿鸣 Studio",
+    avatar: "鹿S",
+    bio: "低饱和通勤、Clean Fit 与轻熟外套集合。",
+    revenue: 0,
+    followerCount: 12680,
+    styleFocus: "通勤极简",
+  },
+  {
+    id: "seller-dark",
+    name: "Noir Daily",
+    avatar: "ND",
+    bio: "高街暗黑、短夹克和黑白灰比例。",
+    revenue: 0,
+    followerCount: 18420,
+    styleFocus: "高街暗黑",
+  },
+  {
+    id: "seller-seoul",
+    name: "Seoul Loose",
+    avatar: "SL",
+    bio: "韩系宽松、软糯针织和浅色层次。",
+    revenue: 0,
+    followerCount: 9360,
+    styleFocus: "韩系宽松",
+  },
+  {
+    id: "seller-japan",
+    name: "North Works",
+    avatar: "NW",
+    bio: "日系工装、马甲、工装裤和耐看中性色。",
+    revenue: 0,
+    followerCount: 11880,
+    styleFocus: "日系工装",
+  },
+  {
+    id: "seller-sweet",
+    name: "Sweet Edge",
+    avatar: "SE",
+    bio: "甜酷辣妹、短上衣和亮色配饰。",
+    revenue: 0,
+    followerCount: 20340,
+    styleFocus: "甜酷辣妹",
+  },
+  {
+    id: "seller-french",
+    name: "Maison Ease",
+    avatar: "ME",
+    bio: "法式松弛、轻熟长裙和柔和针织。",
+    revenue: 0,
+    followerCount: 16760,
+    styleFocus: "法式松弛",
   },
 ];
 
@@ -480,12 +543,69 @@ export const seedPosts: Post[] = [
   })),
 ];
 
+const generatedRequestPosts: Post[] = generatedRequests.map((request) => ({
+  id: `post-${request.id}`,
+  type: "buyer-request",
+  requestId: request.id,
+  title: `征集：${request.expectedItem}`,
+  body: request.description,
+  coverImage: request.image,
+  images: [request.image],
+  styleTags: request.tags,
+  likes: Math.floor(request.matchedOffers.length * 18 + 36),
+  createdAt: request.createdAt,
+  priceLabel: `预算 ¥${request.budget}`,
+}));
+
+function alignPostProducts(posts: Post[], products: Product[]): Post[] {
+  const productsById = new Map(products.map((product) => [product.id, product]));
+
+  return posts.map((post) => {
+    const tagIds = post.productTags?.map((tag) => tag.productId).filter((id) => productsById.has(id)) ?? [];
+    const fallbackIds = [
+      ...(post.productIds ?? []),
+      ...(post.productId ? [post.productId] : []),
+    ].filter((id) => productsById.has(id));
+    const productIds = [...new Set(tagIds.length ? tagIds : fallbackIds)];
+    const productTags = productIds.length
+      ? productIds.map((productId, index) => {
+          const sourceTag = post.productTags?.find((tag) => tag.productId === productId);
+          const product = productsById.get(productId);
+
+          return {
+            productId,
+            label: product?.name ?? sourceTag?.label ?? "同款商品",
+            x: sourceTag?.x ?? (index === 0 ? 54 : 42),
+            y: sourceTag?.y ?? (index === 0 ? 40 : 62),
+          };
+        })
+      : post.productTags;
+
+    return {
+      ...post,
+      productId: productIds[0] ?? post.productId,
+      productIds: productIds.length ? productIds : post.productIds,
+      productTags,
+    };
+  });
+}
+
+const seedDemoProducts = [...generatedProducts, ...seedProducts];
+const seedDemoPosts = alignPostProducts(
+  [...generatedPosts, ...generatedRequestPosts, ...seedPosts],
+  seedDemoProducts,
+);
+
 export const seedDemoState: DemoState = {
-  sellers: seedSellers,
-  bloggers: seedBloggers,
-  products: seedProducts,
-  posts: seedPosts,
-  requests: seedRequests,
+  sellers: [...generatedSellers, ...seedSellers],
+  bloggers: [
+    seedBloggers[0],
+    ...generatedBloggers,
+    ...seedBloggers.filter((blogger) => blogger.id !== seedBloggers[0].id),
+  ],
+  products: seedDemoProducts,
+  posts: seedDemoPosts,
+  requests: [...generatedRequests, ...seedRequests],
   collabRequests: [],
   viewer: {
     balance: 500,

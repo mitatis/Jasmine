@@ -23,6 +23,7 @@ import type {
   ProfileSectionKey,
   ProfileVisibility,
   RequestPost,
+  Seller,
 } from "@/lib/types";
 
 const STORAGE_KEY = "jasmine-demo-state-v1";
@@ -66,41 +67,112 @@ function cloneSeedState(): DemoState {
   return JSON.parse(JSON.stringify(seedDemoState)) as DemoState;
 }
 
+function mergeSeedBackedItems<T extends { id: string }>(
+  seedItems: T[],
+  storedItems: T[] | undefined,
+  mergeSeedItem: (seedItem: T, storedItem: T) => T,
+) {
+  if (!storedItems?.length) {
+    return seedItems;
+  }
+
+  const seedIds = new Set(seedItems.map((item) => item.id));
+  const storedById = new Map(storedItems.map((item) => [item.id, item]));
+  const customItems = storedItems.filter((item) => !seedIds.has(item.id));
+
+  return [
+    ...customItems,
+    ...seedItems.map((seedItem) => {
+      const storedItem = storedById.get(seedItem.id);
+      return storedItem ? mergeSeedItem(seedItem, storedItem) : seedItem;
+    }),
+  ];
+}
+
+function alignPostProductTags(posts: Post[], products: Product[]) {
+  const productsById = new Map(products.map((product) => [product.id, product]));
+
+  return posts.map((post) => {
+    const productIds = getPostProductIdsForState(post).filter((productId) => productsById.has(productId));
+
+    if (!productIds.length) {
+      return post;
+    }
+
+    return {
+      ...post,
+      productId: productIds[0],
+      productIds,
+      productTags: productIds.map((productId, index) => {
+        const sourceTag = post.productTags?.find((tag) => tag.productId === productId);
+        const product = productsById.get(productId);
+
+        return {
+          productId,
+          label: product?.name ?? sourceTag?.label ?? "同款商品",
+          x: sourceTag?.x ?? (index === 0 ? 54 : 42),
+          y: sourceTag?.y ?? (index === 0 ? 40 : 62),
+        };
+      }),
+    };
+  });
+}
+
+function getPostProductIdsForState(post: Post) {
+  const tagIds = post.productTags?.map((tag) => tag.productId) ?? [];
+  const ids = [
+    ...tagIds,
+    ...(post.productIds ?? []),
+    ...(post.productId ? [post.productId] : []),
+  ];
+
+  return [...new Set(ids)];
+}
+
 function normalizeState(value: DemoState): DemoState {
   const seed = cloneSeedState();
-  const seedPostsById = new Map(seed.posts.map((post) => [post.id, post]));
-  const seedProductsById = new Map(seed.products.map((product) => [product.id, product]));
+  const sellers = mergeSeedBackedItems<Seller>(seed.sellers, value.sellers, (seedSeller, storedSeller) => ({
+    ...seedSeller,
+    revenue: storedSeller.revenue,
+    followerCount: storedSeller.followerCount,
+  }));
+  const bloggers = mergeSeedBackedItems<Blogger>(seed.bloggers, value.bloggers, (seedBlogger, storedBlogger) => ({
+    ...seedBlogger,
+    followerCount: storedBlogger.followerCount,
+  }));
+  const products = mergeSeedBackedItems<Product>(seed.products, value.products, (seedProduct, storedProduct) => {
+    return {
+      ...seedProduct,
+      stock: storedProduct.stock,
+      sourcePostId: storedProduct.sourcePostId ?? seedProduct.sourcePostId,
+      sourcePostIds: [
+        ...new Set([
+          ...(storedProduct.sourcePostIds ?? []),
+          ...(seedProduct.sourcePostIds ?? []),
+        ]),
+      ],
+    };
+  });
+  const posts = alignPostProductTags(
+    mergeSeedBackedItems<Post>(seed.posts, value.posts, (seedPost, storedPost) => {
+      return {
+        ...seedPost,
+        likes: storedPost.likes,
+        createdAt: storedPost.createdAt,
+      };
+    }),
+    products,
+  );
 
   return {
     ...seed,
     ...value,
-    bloggers: value.bloggers?.length ? value.bloggers : seed.bloggers,
+    sellers,
+    bloggers,
     collabRequests: value.collabRequests ?? [],
-    products: (value.products?.length ? value.products : seed.products).map((product) => {
-      const seedProduct = seedProductsById.get(product.id);
-
-      if (!seedProduct) {
-        return product;
-      }
-
-      return {
-        ...seedProduct,
-        stock: product.stock,
-      };
-    }),
-    posts: (value.posts?.length ? value.posts : seed.posts).map((post) => {
-      const seedPost = seedPostsById.get(post.id);
-
-      if (!seedPost) {
-        return post;
-      }
-
-      return {
-        ...seedPost,
-        likes: post.likes,
-        createdAt: post.createdAt,
-      };
-    }),
+    requests: mergeSeedBackedItems<RequestPost>(seed.requests, value.requests, (seedRequest) => seedRequest),
+    products,
+    posts,
     viewer: {
       ...seed.viewer,
       ...value.viewer,
@@ -308,18 +380,23 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
       },
       trackView,
       publishUserPost(payload) {
+        const productTags = payload.productIds?.map((productId, index) => {
+          const product = resolveProduct(state.products, productId);
+
+          return {
+            productId,
+            label: product?.name ?? (index === 0 ? "同款商品" : "搭配商品"),
+            x: index === 0 ? 54 : 42,
+            y: index === 0 ? 40 : 62,
+          };
+        });
         const post: Post = {
           id: `post-user-${Date.now()}`,
           type: "seller-look",
           bloggerId: "blogger-me",
           productId: payload.productIds?.[0],
           productIds: payload.productIds,
-          productTags: payload.productIds?.map((productId, index) => ({
-            productId,
-            label: index === 0 ? "同款商品" : "搭配商品",
-            x: index === 0 ? 54 : 42,
-            y: index === 0 ? 40 : 62,
-          })),
+          productTags,
           title: payload.title,
           body: payload.body,
           coverImage: payload.coverImage,

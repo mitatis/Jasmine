@@ -7,9 +7,8 @@ const POSTS_DIR = path.join(OUT_ROOT, "posts");
 const PRODUCTS_DIR = path.join(OUT_ROOT, "products");
 const REQUESTS_DIR = path.join(OUT_ROOT, "requests");
 const MODEL = "doubao-seedream-5-0-260128";
-const TOTAL_POSTS = 150;
-const TOTAL_PRODUCTS = 80;
 const TOTAL_REQUESTS = 20;
+const SKIP_API = process.env.SEEDREAM_SKIP_API === "1";
 
 const CATEGORIES = {
   outerwear: "外套/夹克",
@@ -466,14 +465,6 @@ function buildSizeGuide(sizes) {
   }));
 }
 
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 function pick(array, index) {
   return array[index % array.length];
 }
@@ -819,6 +810,69 @@ function chunkArray(items, size) {
   return chunks;
 }
 
+async function publicFileExists(relPath) {
+  try {
+    await fs.access(path.join(ROOT, "public", relPath.replace(/^\/+/, "")));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyPublicFile(sourceRel, targetRel) {
+  const sourceAbs = path.join(ROOT, "public", sourceRel.replace(/^\/+/, ""));
+  const targetAbs = path.join(ROOT, "public", targetRel.replace(/^\/+/, ""));
+  await fs.mkdir(path.dirname(targetAbs), { recursive: true });
+  await fs.copyFile(sourceAbs, targetAbs);
+}
+
+function fallbackPostImageForCluster(clusterKey) {
+  const map = {
+    clean: "/generated/seedream-v1/post-clean-commute.jpg",
+    dark: "/generated/seedream-v1/post-urban-black.jpg",
+    vintage: "/generated/seedream-v1/post-vintage-leather.jpg",
+    seoul: "/generated/seedream-v1/post-loose-seoul.jpg",
+    japanese: "/generated/seedream-v1/post-olive-trench.jpg",
+    sweet: "/generated/seedream-v1/post-bomber-night.jpg",
+    french: "/generated/seedream-v1/post-sand-gallery.jpg",
+  };
+  return map[clusterKey] ?? "/generated/seedream-v1/post-clean-commute.jpg";
+}
+
+function fallbackProductImage(index) {
+  const pool = [
+    "/generated/seedream-v1/product-jacket-black.jpg",
+    "/generated/seedream-v1/product-blazer-sand.jpg",
+    "/generated/seedream-v1/product-denim-wash.jpg",
+    "/generated/seedream-v1/product-knit-ivory.jpg",
+    "/generated/seedream-v1/product-trench-olive.jpg",
+    "/generated/seedream-v1/product-bomber-noir.jpg",
+  ];
+  return pool[index % pool.length];
+}
+
+function fallbackRequestImage(index) {
+  const pool = [
+    "/generated/seedream-bulk/posts/post-bulk-001.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-002.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-003.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-004.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-005.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-006.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-007.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-008.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-009.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-010.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-011.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-012.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-013.jpg",
+    "/generated/seedream-bulk/posts/post-bulk-014.jpg",
+    "/generated/seedream-v1/post-clean-commute.jpg",
+    "/generated/seedream-v1/post-urban-black.jpg",
+  ];
+  return pool[index % pool.length];
+}
+
 async function main() {
   await loadEnv();
   await ensureDir(POSTS_DIR);
@@ -837,126 +891,175 @@ async function main() {
     requests: [],
   };
 
-  const bloggerGroups = chunkArray(bloggers, 3);
-  for (let groupIndex = 0; groupIndex < bloggerGroups.length; groupIndex += 1) {
-    const group = bloggerGroups[groupIndex];
-    const groupPosts = group.flatMap((blogger) => postsByBlogger.get(blogger.id) ?? []);
-    const batchResults = await generateAdaptiveBatch({
-      items: groupPosts.map((post) => ({
-        id: post.id,
-        prompt: `${post.title} | ${post.body} | ${post.template.outfit}`,
-      })),
-      idPrefix: `blogger-group-${groupIndex + 1}`,
-      promptBuilder: (chunk) => {
-        const chunkMap = new Map(chunk.map((item) => [item.id, item]));
-        const lines = [
-          `生成${chunk.length}张互相关联的小红书穿搭封面图，全部是竖版真实摄影。`,
-          `人物一致性：以下 3 位博主各自保持同一个人物主体、脸型、发型和身材比例不变，仅更换穿搭和场景。`,
-        ];
-        for (const blogger of group) {
-          const blogPosts = (postsByBlogger.get(blogger.id) ?? []).filter((post) => chunkMap.has(post.id));
-          if (!blogPosts.length) continue;
-          const promptBlock = postPrompt(blogger, blogPosts);
-          lines.push(`博主 ${blogger.id} / ${blogger.name}`);
-          lines.push(promptBlock);
-        }
-        lines.push("禁止：欧美脸、模糊手脚、畸形肢体、过曝、卡通感、商品穿模。");
-        return lines.join("\n");
-      },
-      seed: 1000 + groupIndex * 37,
-      dir: POSTS_DIR,
-    });
-
-    for (const result of batchResults) {
-      const post = posts.find((item) => item.id === result.id);
-      const blogger = bloggers.find((item) => item.id === post?.bloggerId);
-      if (!post || !blogger) {
-        continue;
-      }
-      post.coverImage = result.path;
-      post.images = [result.path];
-      post.productTags = buildPostTags(post.productIds, products);
-      blogger.coverImage = blogger.coverImage || result.path;
-      manifest.posts.push({
-        id: post.id,
-        path: result.path,
-        bloggerId: blogger.id,
-        prompt: result.prompt,
-      });
-    }
-  }
-
-  const productBatches = [];
-  for (let i = 0; i < products.length; i += 10) {
-    productBatches.push(products.slice(i, i + 10));
-  }
-
-  for (const batch of productBatches) {
-    const productGroups = chunkArray(batch, 5);
-
-    for (let groupIndex = 0; groupIndex < productGroups.length; groupIndex += 1) {
-      const group = productGroups[groupIndex];
+  if (!SKIP_API) {
+    const bloggerGroups = chunkArray(bloggers, 3);
+    for (let groupIndex = 0; groupIndex < bloggerGroups.length; groupIndex += 1) {
+      const group = bloggerGroups[groupIndex];
+      const groupPosts = group.flatMap((blogger) => postsByBlogger.get(blogger.id) ?? []);
       const batchResults = await generateAdaptiveBatch({
-        items: group.map((product) => ({
-          id: product.id,
-          prompt: `${product.name} | ${product.categoryLabel} | ${product.material}`,
+        items: groupPosts.map((post) => ({
+          id: post.id,
+          prompt: `${post.title} | ${post.body} | ${post.template.outfit}`,
         })),
-        idPrefix: `${group[0].id}-batch-${groupIndex + 1}`,
-        promptBuilder: () => productPrompt(group),
-        seed: 3000 + Number(group[0].id.split("-").pop()) * 10 + groupIndex,
-        dir: PRODUCTS_DIR,
+        idPrefix: `blogger-group-${groupIndex + 1}`,
+        promptBuilder: (chunk) => {
+          const chunkMap = new Map(chunk.map((item) => [item.id, item]));
+          const lines = [
+            `生成${chunk.length}张互相关联的小红书穿搭封面图，全部是竖版真实摄影。`,
+            `人物一致性：以下 3 位博主各自保持同一个人物主体、脸型、发型和身材比例不变，仅更换穿搭和场景。`,
+          ];
+          for (const blogger of group) {
+            const blogPosts = (postsByBlogger.get(blogger.id) ?? []).filter((post) => chunkMap.has(post.id));
+            if (!blogPosts.length) continue;
+            const promptBlock = postPrompt(blogger, blogPosts);
+            lines.push(`博主 ${blogger.id} / ${blogger.name}`);
+            lines.push(promptBlock);
+          }
+          lines.push("禁止：欧美脸、模糊手脚、畸形肢体、过曝、卡通感、商品穿模。");
+          return lines.join("\n");
+        },
+        seed: 1000 + groupIndex * 37,
+        dir: POSTS_DIR,
       });
 
       for (const result of batchResults) {
-        const product = products.find((item) => item.id === result.id);
-        if (!product) {
+        const post = posts.find((item) => item.id === result.id);
+        const blogger = bloggers.find((item) => item.id === post?.bloggerId);
+        if (!post || !blogger) {
           continue;
         }
-        product.image = result.path;
-        product.detailImages = [result.path];
-        product.tryOnPreset = result.path;
-        manifest.products.push({
-          id: result.id,
+        post.coverImage = result.path;
+        post.images = [result.path];
+        post.productTags = buildPostTags(post.productIds, products);
+        blogger.coverImage = blogger.coverImage || result.path;
+        manifest.posts.push({
+          id: post.id,
           path: result.path,
+          bloggerId: blogger.id,
           prompt: result.prompt,
         });
       }
     }
-  }
 
-  const requestBatches = [];
-  for (let i = 0; i < requests.length; i += 5) {
-    requestBatches.push(requests.slice(i, i + 5));
-  }
+    const productBatches = [];
+    for (let i = 0; i < products.length; i += 10) {
+      productBatches.push(products.slice(i, i + 10));
+    }
 
-  for (const batch of requestBatches) {
-    const requestGroups = chunkArray(batch, 5);
+    for (const batch of productBatches) {
+      const productGroups = chunkArray(batch, 5);
 
-    for (let groupIndex = 0; groupIndex < requestGroups.length; groupIndex += 1) {
-      const group = requestGroups[groupIndex];
-      const batchResults = await generateAdaptiveBatch({
-        items: group.map((request) => ({
-          id: request.id,
-          prompt: request.prompt,
-        })),
-        idPrefix: `${group[0].id}-batch-${groupIndex + 1}`,
-        promptBuilder: () => requestPrompt(group),
-        seed: 5000 + Number(group[0].id.split("-").pop()) * 10 + groupIndex,
-        dir: REQUESTS_DIR,
-      });
+      for (let groupIndex = 0; groupIndex < productGroups.length; groupIndex += 1) {
+        const group = productGroups[groupIndex];
+        const batchResults = await generateAdaptiveBatch({
+          items: group.map((product) => ({
+            id: product.id,
+            prompt: `${product.name} | ${product.categoryLabel} | ${product.material}`,
+          })),
+          idPrefix: `${group[0].id}-batch-${groupIndex + 1}`,
+          promptBuilder: () => productPrompt(group),
+          seed: 3000 + Number(group[0].id.split("-").pop()) * 10 + groupIndex,
+          dir: PRODUCTS_DIR,
+        });
 
-      for (const result of batchResults) {
-        const request = requests.find((item) => item.id === result.id);
-        if (!request) {
-          continue;
+        for (const result of batchResults) {
+          const product = products.find((item) => item.id === result.id);
+          if (!product) {
+            continue;
+          }
+          product.image = result.path;
+          product.detailImages = [result.path];
+          product.tryOnPreset = result.path;
+          manifest.products.push({
+            id: result.id,
+            path: result.path,
+            prompt: result.prompt,
+          });
         }
-        request.image = result.path;
-        manifest.requests.push({
-          id: result.id,
-          path: result.path,
-          prompt: result.prompt,
+      }
+    }
+
+    const requestBatches = [];
+    for (let i = 0; i < requests.length; i += 5) {
+      requestBatches.push(requests.slice(i, i + 5));
+    }
+
+    for (const batch of requestBatches) {
+      const requestGroups = chunkArray(batch, 5);
+
+      for (let groupIndex = 0; groupIndex < requestGroups.length; groupIndex += 1) {
+        const group = requestGroups[groupIndex];
+        const batchResults = await generateAdaptiveBatch({
+          items: group.map((request) => ({
+            id: request.id,
+            prompt: request.prompt,
+          })),
+          idPrefix: `${group[0].id}-batch-${groupIndex + 1}`,
+          promptBuilder: () => requestPrompt(group),
+          seed: 5000 + Number(group[0].id.split("-").pop()) * 10 + groupIndex,
+          dir: REQUESTS_DIR,
+        });
+
+        for (const result of batchResults) {
+          const request = requests.find((item) => item.id === result.id);
+          if (!request) {
+            continue;
+          }
+          request.image = result.path;
+          manifest.requests.push({
+            id: result.id,
+            path: result.path,
+            prompt: result.prompt,
+          });
+        }
+      }
+    }
+  } else {
+    for (const blogger of bloggers) {
+      const blogPosts = postsByBlogger.get(blogger.id) ?? [];
+      for (const post of blogPosts) {
+        const relPath = `/generated/seedream-bulk/posts/${post.id}.jpg`;
+        const finalPath = (await publicFileExists(relPath)) ? relPath : fallbackPostImageForCluster(blogger.clusterKey);
+        post.coverImage = finalPath;
+        post.images = [finalPath];
+        post.productTags = buildPostTags(post.productIds, products);
+        blogger.coverImage = blogger.coverImage || finalPath;
+        manifest.posts.push({
+          id: post.id,
+          path: finalPath,
+          bloggerId: blogger.id,
+          prompt: `${post.title} | ${post.body} | ${post.template.outfit}`,
         });
       }
+    }
+
+    for (const [index, product] of products.entries()) {
+      const relPath = `/generated/seedream-bulk/products/${product.id}.jpg`;
+      const fallbackPath = fallbackProductImage(index);
+      const finalPath = (await publicFileExists(relPath)) ? relPath : relPath;
+      if (!(await publicFileExists(relPath))) {
+        await copyPublicFile(fallbackPath, relPath);
+      }
+      product.image = finalPath;
+      product.detailImages = [finalPath];
+      product.tryOnPreset = finalPath;
+      manifest.products.push({
+        id: product.id,
+        path: finalPath,
+        prompt: `${product.name} | ${product.categoryLabel} | ${product.material}`,
+      });
+    }
+
+    for (const [index, request] of requests.entries()) {
+      const sourcePath = fallbackRequestImage(index);
+      const finalPath = `/generated/seedream-bulk/requests/${request.id}.jpg`;
+      await copyPublicFile(sourcePath, finalPath);
+      request.image = finalPath;
+      manifest.requests.push({
+        id: request.id,
+        path: finalPath,
+        prompt: request.prompt,
+      });
     }
   }
 
@@ -1043,7 +1146,7 @@ async function main() {
     createdAt: request.createdAt,
   }));
 
-  const tsFile = `/* eslint-disable */\nimport type { Blogger, Post, Product, RequestPost } from \"@/lib/types\";\n\nexport const generatedBloggers = ${serializeTs(bloggerObjects)} satisfies Blogger[];\n\nexport const generatedProducts = ${serializeTs(productObjects)} satisfies Product[];\n\nexport const generatedPosts = ${serializeTs(postObjects)} satisfies Post[];\n\nexport const generatedRequests = ${serializeTs(requestObjects)} satisfies RequestPost[];\n`;
+  const tsFile = `import type { Blogger, Post, Product, RequestPost } from \"@/lib/types\";\n\nexport const generatedBloggers = ${serializeTs(bloggerObjects)} satisfies Blogger[];\n\nexport const generatedProducts = ${serializeTs(productObjects)} satisfies Product[];\n\nexport const generatedPosts = ${serializeTs(postObjects)} satisfies Post[];\n\nexport const generatedRequests = ${serializeTs(requestObjects)} satisfies RequestPost[];\n`;
 
   await fs.writeFile(path.join(ROOT, "src", "lib", "generated-mock-market.ts"), tsFile);
   await fs.writeFile(path.join(OUT_ROOT, "manifest.json"), `${JSON.stringify({ ...manifest, totalImages: manifest.posts.length + manifest.products.length + manifest.requests.length }, null, 2)}\n`);

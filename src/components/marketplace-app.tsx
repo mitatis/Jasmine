@@ -1408,10 +1408,12 @@ export function FeedPage() {
       ? sorted
       : feedTab === "following"
         ? followedFeed.length ? followedFeed : sorted.slice(0, 4)
-        : [
-            ...sorted.filter((post) => post.type === "seller-look").slice(0, 5),
-            ...sorted.filter((post) => post.type === "buyer-request").slice(0, 2),
-          ].sort((left, right) => right.likes - left.likes);
+        : [...sorted].sort((left, right) => {
+            const typeWeight = (post: Post) => (post.type === "buyer-request" ? 0.92 : 1);
+            const leftScore = left.likes * typeWeight(left) + new Date(left.createdAt).getTime() / 100000000000;
+            const rightScore = right.likes * typeWeight(right) + new Date(right.createdAt).getTime() / 100000000000;
+            return rightScore - leftScore;
+          });
   if (!hydrated) {
     return <LoadingScreen label="正在加载..." />;
   }
@@ -1877,11 +1879,13 @@ export function PostDetailPage({ postId }: { postId: string }) {
                   <Link
                     key={`${tag.productId}-${tag.label}`}
                     href={`/products/${tag.productId}`}
-                    className="absolute inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full bg-primary/90 px-3 py-2 text-xs font-semibold text-primary-foreground shadow-[0_14px_34px_-20px_rgba(0,0,0,0.55)] backdrop-blur transition hover:bg-primary"
+                    className="absolute inline-flex max-w-[220px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-primary/92 py-1.5 pl-1.5 pr-3 text-xs font-semibold text-primary-foreground shadow-[0_14px_34px_-20px_rgba(0,0,0,0.55)] backdrop-blur transition hover:bg-primary"
                     style={{ left: `${tag.x}%`, top: `${tag.y}%` }}
                   >
-                    <Package className="size-3.5" />
-                    {tag.label}
+                    <span className="size-7 shrink-0 overflow-hidden rounded-full border border-white/40 bg-white">
+                      <img src={linkedProduct.image} alt={linkedProduct.name} className="h-full w-full object-cover" />
+                    </span>
+                    <span className="truncate">{linkedProduct.name}</span>
                   </Link>
                 );
               })}
