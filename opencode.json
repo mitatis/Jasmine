@@ -1,0 +1,45 @@
+{
+  "provider": {
+    "openai": {
+      "options": {
+        "baseURL": "https://imagineers.twofishai.com/v1",
+        "apiKey": "<REDACTED>"
+      },
+      "models": {
+        "qwen3.6-plus": {
+          "name": "Qwen3.6-Plus",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          }
+        },
+        "glm-5.1": {
+          "name": "GLM-5.1",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          }
+        }
+      }
+    }
+  },
+  "agent": {
+    "build": {
+      "options": {
+        "store": false
+      }
+    },
+    "plan": {
+      "options": {
+        "store": false
+      }
+    }
+  },
+  "$schema": "https://opencode.ai/config.json"
+}

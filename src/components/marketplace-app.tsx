@@ -1,0 +1,3038 @@
+/* eslint-disable @next/next/no-img-element */
+
+"use client";
+
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Heart,
+  LoaderCircle,
+  Home,
+  ImagePlus,
+  Lock,
+  Package,
+  RefreshCcw,
+  Search,
+  Settings,
+  Shirt,
+  ShoppingBag,
+  Sparkles,
+  Star,
+  Store,
+  UserPlus,
+  Wallet,
+  ShoppingCart,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { useDemo } from "@/components/demo-provider";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { buildStyleAnalysis, seedProducts, seedSellers } from "@/lib/seed";
+import { cn } from "@/lib/utils";
+import type {
+  AIStyledPostDraft,
+  Blogger,
+  Order,
+  Post,
+  Product,
+  ProfileSectionKey,
+  ProfileVisibility,
+  RequestPost,
+  Seller,
+  StyleAnalysis,
+} from "@/lib/types";
+
+type PurchaseSummary = {
+  order: Order;
+  balanceBefore: number;
+  balanceAfter: number;
+  stockBefore: number;
+  stockAfter: number;
+  sellerRevenueBefore: number;
+  sellerRevenueAfter: number;
+} | null;
+
+type AppMode = "buyer" | "seller";
+
+type FollowerProfile = {
+  id: string;
+  name: string;
+  avatar: string;
+  bio: string;
+};
+
+type ProfileSection = {
+  key: ProfileSectionKey;
+  title: string;
+  count: number;
+  content: React.ReactNode;
+  emptyLabel: string;
+  forceContent?: boolean;
+};
+
+const visibilityLabels: Record<ProfileVisibility, string> = {
+  public: "公开可见",
+  following: "关注的人可见",
+  followers: "粉丝可见",
+  mutual: "互关可见",
+};
+
+const sectionTitles: Record<ProfileSectionKey, string> = {
+  likedPosts: "点赞的帖子",
+  savedPosts: "收藏的帖子",
+  followedBloggers: "关注的博主",
+  followedSellers: "关注的商户",
+};
+
+function formatCurrency(value: number) {
+  return `¥${value}`;
+}
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function resolveSeller(sellers: Seller[], sellerId?: string) {
+  return sellers.find((seller) => seller.id === sellerId);
+}
+
+function resolveBlogger(bloggers: Blogger[], bloggerId?: string) {
+  return bloggers.find((blogger) => blogger.id === bloggerId);
+}
+
+function resolveProduct(products: Product[], productId?: string) {
+  return products.find((product) => product.id === productId);
+}
+
+function getPostProductIds(post?: Post) {
+  if (!post) {
+    return [];
+  }
+
+  return post.productIds?.length ? post.productIds : post.productId ? [post.productId] : [];
+}
+
+function getProductPosts(posts: Post[], productId: string) {
+  return posts.filter((post) => getPostProductIds(post).includes(productId));
+}
+
+function getBloggerPosts(posts: Post[], bloggerId: string) {
+  return posts.filter((post) => post.bloggerId === bloggerId);
+}
+
+function getSizeGuide(product: Product) {
+  return product.sizeGuide?.length
+    ? product.sizeGuide
+    : product.sizes.map((size, index) => ({
+        size,
+        shoulder: `${42 + index * 2}cm`,
+        chest: `${104 + index * 6}cm`,
+        length: `${62 + index * 2}cm`,
+      }));
+}
+
+function getRecommendedBloggers(product: Product | null, bloggers: Blogger[]) {
+  if (!product) {
+    return bloggers.slice(0, 3).map((blogger) => ({ blogger, score: 90 }));
+  }
+
+  return bloggers
+    .map((blogger) => {
+      const overlap = blogger.styleTags.filter((tag) => product.tags.includes(tag)).length;
+      const score = Math.min(98, 82 + overlap * 6);
+      return { blogger, score };
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 3);
+}
+
+function getCurrentUserFollowers(bloggers: Blogger[]) {
+  const bloggerFollowers: FollowerProfile[] = bloggers
+    .filter((blogger) => blogger.id !== "blogger-me")
+    .map((blogger) => ({
+      id: blogger.id,
+      name: blogger.name,
+      avatar: blogger.avatar,
+      bio: `穿搭博主 · ${blogger.styleTags.slice(0, 2).join(" / ")}`,
+    }));
+  const generatedFollowers: FollowerProfile[] = Array.from({ length: 1204 }, (_, index) => {
+    const serial = index + 1;
+    return {
+      id: `user-follower-${serial}`,
+      name: `市集粉丝 ${serial.toString().padStart(4, "0")}`,
+      avatar: `F${serial % 10}`,
+      bio: serial % 3 === 0 ? "关注通勤穿搭和 AI 试衣" : serial % 3 === 1 ? "喜欢 OOTD 和同款找衣" : "收藏 clean fit 灵感",
+    };
+  });
+
+  return [...bloggerFollowers, ...generatedFollowers];
+}
+
+function FollowerMiniCard({ follower }: { follower: FollowerProfile }) {
+  return (
+    <div className="rounded-[22px] border border-border/70 bg-white p-4">
+      <div className="flex items-center gap-3">
+        <Avatar className="size-12 border border-border/70 bg-secondary">
+          <AvatarFallback>{follower.avatar}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold">{follower.name}</p>
+          <p className="line-clamp-1 text-sm text-muted-foreground">{follower.bio}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function readImageFiles(files: FileList | File[]) {
+  return Promise.all(
+    Array.from(files)
+      .filter((file) => file.type.startsWith("image/"))
+      .map(
+        (file) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          }),
+      ),
+  );
+}
+
+function LocalImageUploader({
+  label,
+  images,
+  onChange,
+  multiple = true,
+}: {
+  label: string;
+  images: string[];
+  onChange: (images: string[]) => void;
+  multiple?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function addFiles(files: FileList | File[]) {
+    const nextImages = await readImageFiles(files);
+    if (!nextImages.length) {
+      toast.error("请选择图片文件。");
+      return;
+    }
+    onChange(multiple ? [...images, ...nextImages].slice(0, 9) : [nextImages[0]]);
+  }
+
+  return (
+    <div className="space-y-3">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          void addFiles(event.dataTransfer.files);
+        }}
+        className="flex min-h-44 w-full flex-col items-center justify-center gap-3 rounded-[26px] border border-dashed border-border bg-secondary/30 px-5 py-8 text-center transition hover:bg-secondary/60"
+      >
+        <ImagePlus className="size-8" />
+        <div>
+          <p className="font-semibold">{label}</p>
+          <p className="mt-1 text-sm text-muted-foreground">拖动图片到这里，或点击上传本地图片。</p>
+        </div>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple={multiple}
+        className="hidden"
+        onChange={(event) => {
+          if (event.target.files) {
+            void addFiles(event.target.files);
+          }
+          event.currentTarget.value = "";
+        }}
+      />
+      {images.length ? (
+        <div className="grid grid-cols-3 gap-3">
+          {images.map((image, index) => (
+            <div key={`${image}-${index}`} className="group relative overflow-hidden rounded-[18px] border border-border/70">
+              <img src={image} alt={`上传图片 ${index + 1}`} className="h-28 w-full object-cover" />
+              <button
+                type="button"
+                onClick={() => onChange(images.filter((_, imageIndex) => imageIndex !== index))}
+                className="absolute right-2 top-2 rounded-full bg-primary/90 px-2 py-1 text-xs text-primary-foreground opacity-0 transition group-hover:opacity-100"
+              >
+                删除
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AppHeader({ mode }: { mode: AppMode }) {
+  const { resetDemo } = useDemo();
+  const isSeller = mode === "seller";
+  const [publishOpen, setPublishOpen] = useState(false);
+
+  return (
+    <header className="sticky top-0 z-30 border-b border-border/70 bg-background/88 backdrop-blur-xl">
+      <div className="page-shell flex items-center justify-between gap-4 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+            <Shirt />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground">{isSeller ? "商户端" : "用户端"}</p>
+            <Link href="/" className="font-heading text-3xl leading-none">
+              穿搭市集
+            </Link>
+          </div>
+        </div>
+
+        <nav className="hidden items-center gap-1 rounded-full border border-border/80 bg-white/70 px-2 py-1.5 text-sm md:flex">
+          {(isSeller
+            ? [
+                { href: "/sell", label: "发布" },
+                { href: "/seller/posts", label: "帖子" },
+                { href: "/seller/products", label: "商品" },
+              ]
+            : [
+                { href: "/", label: "帖子" },
+                { href: "/products", label: "商城" },
+                { href: "/me", label: "我的" },
+              ]
+          ).map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="rounded-full px-4 py-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+
+        {!isSeller ? (
+          <div className="hidden items-center gap-2 md:flex">
+            <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+              <Button className="bg-primary px-6" onClick={() => setPublishOpen(true)}>
+                <Sparkles data-icon="inline-start" />
+                发布
+              </Button>
+              <DialogContent className="max-w-md rounded-[28px] p-0">
+                <DialogHeader className="px-6 pt-6">
+                  <DialogTitle className="text-3xl">发布内容</DialogTitle>
+                  <DialogDescription>选择发布类型，图文发布支持多图上传，AI 生成统一进入试衣间。</DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-3 px-6 pb-6">
+                  <Link
+                    href="/create"
+                    onClick={() => setPublishOpen(false)}
+                    className="rounded-[24px] border border-border/70 p-4 transition hover:bg-secondary/50"
+                  >
+                    <p className="text-xl font-semibold">发图文</p>
+                    <p className="mt-1 text-sm text-muted-foreground">多图发布 / 商单广场 / 发给商户确认。</p>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => toast.info("视频发布入口已预留。")}
+                    className="rounded-[24px] border border-border/70 p-4 text-left transition hover:bg-secondary/50"
+                  >
+                    <p className="text-xl font-semibold">发视频</p>
+                    <p className="mt-1 text-sm text-muted-foreground">短视频穿搭内容入口。</p>
+                  </button>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <Link href="/try-on" className={cn(buttonVariants({ variant: "outline" }), "px-5")}>
+              <Sparkles data-icon="inline-start" />
+              AI 试衣间
+            </Link>
+          </div>
+        ) : null}
+
+        <div className="flex items-center gap-2">
+          <Link
+            href={isSeller ? "/" : "/sell"}
+            className={cn(buttonVariants({ variant: isSeller ? "outline" : "default" }))}
+          >
+            {isSeller ? <Home data-icon="inline-start" /> : <Store data-icon="inline-start" />}
+            {isSeller ? "切回用户" : "我是商户"}
+          </Link>
+          <Button variant="outline" onClick={resetDemo}>
+            <RefreshCcw data-icon="inline-start" />
+            重置
+          </Button>
+          <StatusSheet mode={mode} />
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function LayoutFrame({
+  title,
+  actions,
+  mode = "buyer",
+  children,
+}: {
+  title: string;
+  description?: string;
+  actions?: React.ReactNode;
+  mode?: AppMode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen pb-12">
+      <AppHeader mode={mode} />
+      <main className="page-shell pt-6">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-3xl leading-none sm:text-4xl">{title}</h1>
+          {actions ? <div className="flex flex-wrap gap-3 lg:justify-end">{actions}</div> : null}
+        </div>
+        {children}
+      </main>
+    </div>
+  );
+}
+
+function StatusSheet({ mode }: { mode: AppMode }) {
+  return (
+    <div className="lg:hidden">
+      <Sheet>
+        <SheetTrigger
+          render={
+            <Button variant="outline">
+              <Wallet data-icon="inline-start" />
+              状态
+            </Button>
+          }
+        />
+        <SheetContent side="right" className="w-[92vw] max-w-md overflow-y-auto p-0">
+          <SheetHeader className="border-b border-border/70">
+            <SheetTitle>当前状态</SheetTitle>
+          </SheetHeader>
+          <div className="p-4">
+            <StatusRail mode={mode} compact />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+function StatusRail({ mode, compact = false }: { mode: AppMode; compact?: boolean }) {
+  const { state } = useDemo();
+  const totalRevenue = state.sellers.reduce((sum, seller) => sum + seller.revenue, 0);
+
+  if (mode === "seller") {
+    return (
+      <div className={cn("flex flex-col gap-4", compact && "gap-3")}>
+        <Card className="soft-panel border-0 bg-white/92 shadow-none">
+          <CardHeader>
+            <CardTitle>商户工作台</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-[22px] bg-primary px-5 py-4 text-primary-foreground">
+              <p className="text-sm opacity-80">累计收入</p>
+              <p className="mt-2 text-4xl font-semibold">{formatCurrency(totalRevenue)}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <MetricCard label="商品数" value={state.products.length.toString()} />
+              <MetricCard label="穿搭帖" value={state.posts.filter((post) => post.type === "seller-look").length.toString()} />
+            </div>
+          </CardContent>
+          <CardFooter className="bg-transparent">
+            <Link href="/" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+              切回用户
+            </Link>
+          </CardFooter>
+        </Card>
+
+        <Card className="soft-panel border-0 bg-white/92 shadow-none">
+          <CardHeader>
+            <CardTitle>商户收入</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {state.sellers.map((seller) => (
+              <div
+                key={seller.id}
+                className="flex items-center justify-between rounded-lg border border-border/70 px-4 py-3"
+              >
+                <div>
+                  <p className="font-medium">{seller.name}</p>
+                  <p className="text-xs text-muted-foreground">{seller.styleFocus}</p>
+                </div>
+                <span className="text-sm font-semibold">{formatCurrency(seller.revenue)}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn("flex flex-col gap-4", compact && "gap-3")}>
+        <Card className="soft-panel border-0 bg-white/92 shadow-none">
+        <CardHeader>
+          <CardTitle>用户钱包</CardTitle>
+          </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-[22px] bg-primary px-5 py-4 text-primary-foreground">
+            <p className="text-sm opacity-80">可用余额</p>
+            <p className="mt-2 text-4xl font-semibold">{formatCurrency(state.viewer.balance)}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <MetricCard label="关注博主" value={state.viewer.followedBloggerIds.length.toString()} />
+            <MetricCard label="点赞帖子" value={state.viewer.likedPostIds.length.toString()} />
+            <MetricCard label="购物车" value={state.viewer.cartProductIds.length.toString()} />
+            <MetricCard label="历史订单" value={state.viewer.orders.length.toString()} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="soft-panel border-0 bg-white/92 shadow-none">
+        <CardHeader>
+          <CardTitle>最近订单</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3">
+            {state.viewer.orders.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+                还没有成交订单。先从帖子里点进商品，完成第一笔购买。
+              </div>
+            ) : (
+              state.viewer.orders.map((order) => (
+                <div key={order.id} className="rounded-2xl border border-border/70 px-4 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-medium">{order.productName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {order.id} · {formatShortDate(order.createdAt)}
+                      </p>
+                    </div>
+                    <Badge>{order.status}</Badge>
+                  </div>
+                  <Separator className="my-3" />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">用户支付</span>
+                    <span className="font-semibold">{formatCurrency(order.amount)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, onClick }: { label: string; value: string; onClick?: () => void }) {
+  const content = (
+    <>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-2 text-xl font-semibold">{value}</p>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="rounded-2xl border border-border/70 bg-card px-4 py-3 text-left transition hover:bg-secondary/50"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card px-4 py-3">
+      {content}
+    </div>
+  );
+}
+
+function FeedPostCard({ post, index }: { post: Post; index: number }) {
+  const { state, toggleLike, toggleBloggerFollow } = useDemo();
+  const seller = resolveSeller(state.sellers, post.sellerId);
+  const blogger = resolveBlogger(state.bloggers, post.bloggerId);
+  const isLiked = state.viewer.likedPostIds.includes(post.id);
+  const isFollowed = blogger ? state.viewer.followedBloggerIds.includes(blogger.id) : false;
+  const href = post.type === "seller-look" ? `/posts/${post.id}` : `/requests/${post.requestId}`;
+  const imageHeights = [
+    "h-[310px]",
+    "h-[390px]",
+    "h-[270px]",
+    "h-[350px]",
+    "h-[430px]",
+    "h-[300px]",
+  ];
+
+  return (
+    <article className="mb-5 break-inside-avoid overflow-hidden rounded-lg border border-border/70 bg-white shadow-[0_14px_36px_-28px_rgba(49,40,27,0.42)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_44px_-30px_rgba(49,40,27,0.48)]">
+      <Link href={href} className="block">
+        <div className="relative">
+          <img
+            src={post.coverImage}
+            alt={post.title}
+            className={cn("w-full object-cover", imageHeights[index % imageHeights.length])}
+          />
+          <div className="absolute left-3 top-3 flex gap-2">
+            <Badge variant={post.type === "seller-look" ? "default" : "secondary"}>
+              {post.type === "seller-look" ? "OOTD" : "征集"}
+            </Badge>
+            {post.type === "buyer-request" && post.priceLabel ? (
+              <Badge variant="secondary">{post.priceLabel}</Badge>
+            ) : null}
+          </div>
+        </div>
+      </Link>
+
+      <div className="flex flex-col gap-3 p-3">
+        <Link href={href} className="block">
+          <h3 className="line-clamp-2 text-[15px] font-semibold leading-6">{post.title}</h3>
+        </Link>
+
+        <div className="flex flex-wrap gap-1.5">
+          {post.styleTags.slice(0, 3).map((tag) => (
+            <span key={tag} className="text-xs text-muted-foreground">
+              #{tag}
+            </span>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <Link href={href} className="flex min-w-0 items-center gap-2">
+            <Avatar className="size-7 border border-border/70 bg-secondary">
+              <AvatarFallback>{blogger?.avatar ?? seller?.avatar ?? "征"}</AvatarFallback>
+            </Avatar>
+            <span className="truncate text-xs text-muted-foreground">
+              {blogger?.name ?? "用户征集"}
+            </span>
+          </Link>
+
+          <div className="flex items-center gap-1.5">
+            {blogger ? (
+              <button
+                type="button"
+                onClick={() => toggleBloggerFollow(blogger.id)}
+                className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+              >
+                {isFollowed ? "已关注" : "关注"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => toggleLike(post.id)}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+              aria-label={isLiked ? "取消点赞" : "点赞帖子"}
+            >
+              <Heart className={cn("size-3.5", isLiked && "fill-current text-foreground")} />
+              {post.likes}
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function SimilarProductList({
+  products,
+  sort,
+  onSortChange,
+}: {
+  products: Product[];
+  sort: string;
+  onSortChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="editorial-kicker">Similar Picks</p>
+          <h3 className="text-3xl">相似商品推荐</h3>
+        </div>
+        <ToggleGroup
+          value={[sort]}
+          onValueChange={(value) => value[0] && onSortChange(value[0])}
+        >
+          <ToggleGroupItem value="similarity">相似度</ToggleGroupItem>
+          <ToggleGroupItem value="price">价格</ToggleGroupItem>
+          <ToggleGroupItem value="value">性价比</ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {products.map((product) => (
+          <Card key={product.id} className="soft-panel border-0 bg-white/94 shadow-none">
+            <img src={product.image} alt={product.name} className="h-56 w-full object-cover" />
+            <CardHeader>
+              <CardTitle>{product.name}</CardTitle>
+              <CardDescription>{product.similarityReason}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">价格</span>
+                <span className="font-semibold">{formatCurrency(product.price)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">库存</span>
+                <span className="font-semibold">{product.stock}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {product.tags.map((tag) => (
+                  <Badge key={tag} variant="secondary">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+            <CardFooter className="justify-between gap-3 bg-transparent">
+              <Badge>{product.similarityScore}% 相似度</Badge>
+              <Link href={`/products/${product.id}`} className={cn(buttonVariants({ variant: "outline" }))}>
+                查看商品
+              </Link>
+            </CardFooter>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductRail({ title, products }: { title: string; products: Product[] }) {
+  const railRef = useRef<HTMLDivElement>(null);
+
+  function scrollBy(direction: "left" | "right") {
+    railRef.current?.scrollBy({
+      left: direction === "left" ? -360 : 360,
+      behavior: "smooth",
+    });
+  }
+
+  if (products.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-2xl">{title}</h3>
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon" onClick={() => scrollBy("left")} aria-label="向左滑动商品">
+            <ChevronLeft />
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => scrollBy("right")} aria-label="向右滑动商品">
+            <ChevronRight />
+          </Button>
+        </div>
+      </div>
+      <div ref={railRef} className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {products.map((product) => (
+          <Link
+            key={product.id}
+            href={`/products/${product.id}`}
+            className="group grid min-w-[300px] grid-cols-[96px_minmax(0,1fr)] gap-3 rounded-[24px] border border-border/70 bg-white/94 p-3 transition hover:-translate-y-0.5 hover:shadow-[0_18px_42px_-32px_rgba(49,40,27,0.45)]"
+          >
+            <img src={product.image} alt={product.name} className="h-28 w-full rounded-[18px] object-cover" />
+            <div className="min-w-0">
+              <p className="truncate font-semibold">{product.name}</p>
+              <p className="mt-1 text-lg font-semibold">{formatCurrency(product.price)}</p>
+              <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{product.similarityReason}</p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {product.tags.slice(0, 2).map((tag) => (
+                  <span key={tag} className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductGridCard({ product }: { product: Product }) {
+  return (
+    <Link
+      href={`/products/${product.id}`}
+      className="group overflow-hidden rounded-lg border border-border/70 bg-white shadow-[0_14px_36px_-28px_rgba(49,40,27,0.42)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_44px_-30px_rgba(49,40,27,0.48)]"
+    >
+      <img src={product.image} alt={product.name} className="h-72 w-full object-cover" />
+      <div className="space-y-3 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <p className="line-clamp-2 font-semibold leading-6">{product.name}</p>
+          <p className="shrink-0 text-lg font-semibold">{formatCurrency(product.price)}</p>
+        </div>
+        <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">{product.similarityReason}</p>
+        <div className="flex flex-wrap gap-2">
+          {product.tags.slice(0, 3).map((tag) => (
+            <Badge key={tag} variant="secondary">
+              {tag}
+            </Badge>
+          ))}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+export function ProductCatalogPage({ mode = "buyer" }: { mode?: AppMode }) {
+  const { state, hydrated } = useDemo();
+  const cartProducts = state.products.filter((product) => state.viewer.cartProductIds.includes(product.id));
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在加载..." />;
+  }
+
+  return (
+    <LayoutFrame
+      mode={mode}
+      title={mode === "seller" ? "商品" : "商城"}
+      actions={
+        mode === "seller" ? (
+          <Link href="/sell" className={cn(buttonVariants({ variant: "default" }))}>
+            <Store data-icon="inline-start" />
+            上架商品
+          </Link>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            <a href="#cart" className={cn(buttonVariants({ variant: "default" }))}>
+              <ShoppingCart data-icon="inline-start" />
+              购物车 {cartProducts.length}
+            </a>
+            <a href="#orders" className={cn(buttonVariants({ variant: "outline" }))}>
+              <ShoppingBag data-icon="inline-start" />
+              历史订单
+            </a>
+          </div>
+        )
+      }
+    >
+      {mode === "buyer" ? (
+        <a
+          href="#cart"
+          className="fixed bottom-8 right-8 z-20 hidden size-16 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_18px_42px_-18px_rgba(49,40,27,0.55)] transition hover:-translate-y-1 lg:flex"
+          aria-label="进入购物车"
+        >
+          <ShoppingCart />
+          <span className="absolute -right-1 -top-1 flex size-6 items-center justify-center rounded-full bg-white text-xs font-semibold text-primary">
+            {cartProducts.length}
+          </span>
+        </a>
+      ) : null}
+
+      <section className={cn("grid gap-6", mode === "buyer" && "xl:grid-cols-[minmax(0,1fr)_360px]")}>
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {state.products.map((product) => (
+            <ProductGridCard key={product.id} product={product} />
+          ))}
+        </div>
+
+        {mode === "buyer" ? (
+          <aside className="space-y-5">
+            <Card id="cart" className="soft-panel border-0 bg-white/96 shadow-none xl:sticky xl:top-24">
+              <CardHeader>
+                <CardTitle>购物车</CardTitle>
+                <p className="text-sm text-muted-foreground">从商品页加入的商品会出现在这里。</p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {cartProducts.length > 0 ? (
+                  cartProducts.map((product) => (
+                    <Link
+                      key={product.id}
+                      href={`/products/${product.id}`}
+                      className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 rounded-[18px] border border-border/70 p-3 transition hover:bg-secondary/40"
+                    >
+                      <img src={product.image} alt={product.name} className="h-20 w-full rounded-[14px] object-cover" />
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{product.name}</p>
+                        <p className="mt-1 text-sm font-semibold">{formatCurrency(product.price)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">库存 {product.stock} · 尺码 {product.sizes.join(" / ")}</p>
+                      </div>
+                    </Link>
+                  ))
+                ) : (
+                  <EmptyState label="购物车为空。进入商品页可加入购物车。" />
+                )}
+              </CardContent>
+            </Card>
+
+            <Card id="orders" className="soft-panel border-0 bg-white/96 shadow-none">
+              <CardHeader>
+                <CardTitle>历史订单</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {state.viewer.orders.length > 0 ? (
+                  state.viewer.orders.map((order) => (
+                    <div key={order.id} className="rounded-[18px] border border-border/70 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{order.productName}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {order.id} · {formatShortDate(order.createdAt)}
+                          </p>
+                        </div>
+                        <Badge>{order.status}</Badge>
+                      </div>
+                      <Separator className="my-3" />
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">支付</span>
+                        <span className="font-semibold">{formatCurrency(order.amount)}</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState label="还没有历史订单。" />
+                )}
+              </CardContent>
+            </Card>
+          </aside>
+        ) : null}
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function SellerPostsPage() {
+  const { state, hydrated } = useDemo();
+  const posts = state.posts.filter((post) => post.type === "seller-look");
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在加载..." />;
+  }
+
+  return (
+    <LayoutFrame
+      mode="seller"
+      title="帖子"
+      actions={
+        <Link href="/sell" className={cn(buttonVariants({ variant: "default" }))}>
+          <Sparkles data-icon="inline-start" />
+          生成帖子
+        </Link>
+      }
+    >
+      <section className="columns-2 gap-5 md:columns-3 xl:columns-4">
+        {posts.map((post, index) => (
+          <FeedPostCard key={post.id} post={post} index={index} />
+        ))}
+      </section>
+    </LayoutFrame>
+  );
+}
+
+function PostMiniCard({ post }: { post: Post }) {
+  return (
+    <Link
+      href={post.type === "seller-look" ? `/posts/${post.id}` : `/requests/${post.requestId}`}
+      className="break-inside-avoid overflow-hidden rounded-[22px] border border-border/70 bg-white transition hover:-translate-y-0.5 hover:shadow-[0_18px_42px_-32px_rgba(49,40,27,0.45)]"
+    >
+      <img src={post.coverImage} alt={post.title} className="h-56 w-full object-cover" />
+      <div className="space-y-2 p-3">
+        <p className="line-clamp-2 font-semibold leading-6">{post.title}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {post.styleTags.slice(0, 3).map((tag) => (
+            <span key={tag} className="text-xs text-muted-foreground">
+              #{tag}
+            </span>
+          ))}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function ProductMiniCard({ product }: { product: Product }) {
+  return (
+    <Link
+      href={`/products/${product.id}`}
+      className="overflow-hidden rounded-[22px] border border-border/70 bg-white transition hover:-translate-y-0.5 hover:shadow-[0_18px_42px_-32px_rgba(49,40,27,0.45)]"
+    >
+      <img src={product.image} alt={product.name} className="h-48 w-full object-cover" />
+      <div className="space-y-2 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <p className="line-clamp-2 font-semibold leading-6">{product.name}</p>
+          <span className="shrink-0 text-sm font-semibold">{formatCurrency(product.price)}</span>
+        </div>
+        <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">{product.similarityReason}</p>
+      </div>
+    </Link>
+  );
+}
+
+function BloggerMiniCard({ blogger }: { blogger: Blogger }) {
+  return (
+    <Link href={`/bloggers/${blogger.id}`} className="rounded-[22px] border border-border/70 bg-white p-4 transition hover:bg-secondary/40">
+      <div className="flex items-center gap-3">
+        <Avatar className="size-12 border border-border/70 bg-secondary">
+          <AvatarFallback>{blogger.avatar}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold">{blogger.name}</p>
+          <p className="line-clamp-1 text-sm text-muted-foreground">{blogger.bio}</p>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function SellerMiniCard({ seller }: { seller: Seller }) {
+  return (
+    <div className="rounded-[22px] border border-border/70 bg-white p-4">
+      <div className="flex items-center gap-3">
+        <Avatar className="size-12 border border-border/70 bg-secondary">
+          <AvatarFallback>{seller.avatar}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold">{seller.name}</p>
+          <p className="line-clamp-1 text-sm text-muted-foreground">{seller.bio}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileSectionCard({
+  section,
+  visibility,
+}: {
+  section: ProfileSection;
+  visibility?: ProfileVisibility;
+}) {
+  return (
+    <Card className="soft-panel border-0 bg-white/96 shadow-none">
+      <CardHeader className="flex-row items-center justify-between gap-4">
+        <div>
+          <CardTitle className="text-3xl">{section.title}</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">{section.count} 项</p>
+        </div>
+        {visibility ? <Badge variant="secondary">{visibilityLabels[visibility]}</Badge> : null}
+      </CardHeader>
+      <CardContent>
+        {section.forceContent || section.count > 0 ? section.content : <EmptyState label={section.emptyLabel} />}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProfilePageShell({
+  title,
+  avatar,
+  name,
+  subtitle,
+  actions,
+  profileAction,
+  stats,
+  sections,
+  visibility,
+  sideRail,
+}: {
+  title: string;
+  avatar: string;
+  name: string;
+  subtitle: string;
+  actions?: React.ReactNode;
+  profileAction?: React.ReactNode;
+  stats: { label: string; value: string; onClick?: () => void }[];
+  sections: ProfileSection[];
+  visibility?: Record<ProfileSectionKey, ProfileVisibility>;
+  sideRail?: React.ReactNode;
+}) {
+  return (
+    <LayoutFrame title={title} actions={actions}>
+      <section className={cn("grid gap-6", sideRail ? "lg:grid-cols-[320px_minmax(0,1fr)_42px]" : "lg:grid-cols-[320px_minmax(0,1fr)]")}>
+        <Card className="soft-panel h-fit overflow-hidden border-0 bg-white/96 shadow-none lg:sticky lg:top-24">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <Avatar className="size-16 border border-border/70 bg-secondary">
+                <AvatarFallback>{avatar}</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <CardTitle className="truncate">{name}</CardTitle>
+                <p className="text-sm text-muted-foreground">{subtitle}</p>
+              </div>
+              {profileAction ? <div className="shrink-0">{profileAction}</div> : null}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-2 gap-3">
+              {stats.map((stat) => (
+                <MetricCard key={stat.label} label={stat.label} value={stat.value} onClick={stat.onClick} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-5">
+          {sections.map((section) => (
+            <div key={`${section.key}-${section.title}`} className="animate-in fade-in-0 slide-in-from-bottom-3 duration-300">
+              <ProfileSectionCard
+                section={section}
+                visibility={visibility?.[section.key]}
+              />
+            </div>
+          ))}
+        </div>
+        {sideRail ? <aside className="hidden lg:block">{sideRail}</aside> : null}
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function BloggerDetailPage({ bloggerId }: { bloggerId: string }) {
+  const { state, hydrated, toggleBloggerFollow, trackView } = useDemo();
+  const blogger = resolveBlogger(state.bloggers, bloggerId);
+  const posts = blogger ? getBloggerPosts(state.posts, blogger.id) : [];
+  const bloggerProductIds = new Set(posts.flatMap((post) => getPostProductIds(post)));
+  const products = state.products.filter((product) => bloggerProductIds.has(product.id));
+  const sellers = state.sellers.filter((seller) =>
+    posts.some((post) => post.sellerId === seller.id),
+  );
+  const relatedBloggers = blogger
+    ? state.bloggers.filter(
+        (item) =>
+          item.id !== blogger.id &&
+          item.styleTags.some((tag) => blogger.styleTags.includes(tag)),
+      )
+    : [];
+
+  useEffect(() => {
+    if (bloggerId) {
+      trackView(`blogger:${bloggerId}`);
+    }
+  }, [bloggerId, trackView]);
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在加载..." />;
+  }
+
+  if (!blogger) {
+    return <MissingScreen title="博主不存在" description="回社区重新选择一个穿搭博主。" />;
+  }
+
+  const followed = state.viewer.followedBloggerIds.includes(blogger.id);
+  const receivedLikes = posts.reduce((sum, post) => sum + post.likes, 0);
+
+  return (
+    <ProfilePageShell
+      title={blogger.name}
+      avatar={blogger.avatar}
+      name={blogger.name}
+      subtitle="访客视角 · 穿搭博主"
+      profileAction={
+        <Button size="sm" variant={followed ? "default" : "outline"} onClick={() => toggleBloggerFollow(blogger.id)}>
+          <UserPlus data-icon="inline-start" />
+          {followed ? "已关注" : "关注"}
+        </Button>
+      }
+      stats={[
+        { label: "关注", value: relatedBloggers.length.toString() },
+        { label: "粉丝", value: blogger.followerCount.toString() },
+        { label: "帖子数", value: posts.length.toString() },
+        { label: "收到点赞", value: receivedLikes.toString() },
+      ]}
+      sections={[
+        {
+          key: "likedPosts",
+          title: "TA 的帖子",
+          count: posts.length,
+          emptyLabel: "这个博主还没有公开帖子。",
+          content: (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {posts.map((post) => (
+                <PostMiniCard key={post.id} post={post} />
+              ))}
+            </div>
+          ),
+        },
+        {
+          key: "savedPosts",
+          title: "穿搭商品",
+          count: products.length,
+          emptyLabel: "还没有关联商品。",
+          content: (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {products.map((product) => (
+                <ProductMiniCard key={product.id} product={product} />
+              ))}
+            </div>
+          ),
+        },
+        {
+          key: "followedBloggers",
+          title: "相似博主",
+          count: relatedBloggers.length,
+          emptyLabel: "暂时没有相似博主。",
+          content: (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {relatedBloggers.map((item) => (
+                <BloggerMiniCard key={item.id} blogger={item} />
+              ))}
+            </div>
+          ),
+        },
+        {
+          key: "followedSellers",
+          title: "合作商户",
+          count: sellers.length,
+          emptyLabel: "还没有合作商户。",
+          content: (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {sellers.map((seller) => (
+                <SellerMiniCard key={seller.id} seller={seller} />
+              ))}
+            </div>
+          ),
+        },
+      ]}
+    />
+  );
+}
+
+export function FeedPage() {
+  const { state, hydrated } = useDemo();
+  const [filter, setFilter] = useState("all");
+
+  const sorted = [...state.posts].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  const feed =
+    filter === "seller"
+      ? sorted.filter((post) => post.type === "seller-look")
+      : filter === "request"
+        ? sorted.filter((post) => post.type === "buyer-request")
+        : sorted;
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在加载..." />;
+  }
+
+  return (
+    <div className="min-h-screen pb-12">
+      <AppHeader mode="buyer" />
+      <main className="page-shell grid gap-6 pt-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="min-w-0 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border/80 bg-white/90 px-5 py-4">
+            <div>
+              <p className="editorial-kicker">OOTD Feed</p>
+              <h1 className="mt-1 text-3xl leading-none">穿搭灵感</h1>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <ToggleGroup
+                value={[filter]}
+                onValueChange={(value) => value[0] && setFilter(value[0])}
+              >
+                <ToggleGroupItem value="all">全部帖子</ToggleGroupItem>
+                <ToggleGroupItem value="seller">商户穿搭</ToggleGroupItem>
+                <ToggleGroupItem value="request">征集帖</ToggleGroupItem>
+              </ToggleGroup>
+              <Link href="/analyze" className={cn(buttonVariants({ variant: "default" }))}>
+                <Search data-icon="inline-start" />
+                粘贴小红书链接
+              </Link>
+              <Link href="/sell" className={cn(buttonVariants({ variant: "outline" }))}>
+                <Store data-icon="inline-start" />
+                我是商户
+              </Link>
+            </div>
+          </div>
+          <div className="columns-2 gap-5 md:columns-3 xl:columns-4 2xl:columns-5">
+            {feed.map((post, index) => (
+              <FeedPostCard key={post.id} post={post} index={index} />
+            ))}
+          </div>
+        </section>
+
+        <aside className="hidden lg:block">
+          <div className="sticky top-24">
+            <StatusRail mode="buyer" />
+          </div>
+        </aside>
+      </main>
+    </div>
+  );
+}
+
+export function PostDetailPage({ postId }: { postId: string }) {
+  const { state, toggleFollow, toggleBloggerFollow, toggleLike, toggleSavePost, trackView } = useDemo();
+  const [activeImage, setActiveImage] = useState("");
+  const post = state.posts.find((item) => item.id === postId);
+  const seller = resolveSeller(state.sellers, post?.sellerId);
+  const blogger = resolveBlogger(state.bloggers, post?.bloggerId);
+  const postProductIds = getPostProductIds(post);
+  const attachedProducts = postProductIds
+    .map((id) => resolveProduct(state.products, id))
+    .filter((product): product is Product => Boolean(product));
+
+  useEffect(() => {
+    if (postId) {
+      trackView(`post:${postId}`);
+    }
+  }, [postId, trackView]);
+
+  const similarProducts = !post
+    ? []
+    : state.products
+        .filter((item) => item.tags.some((tag) => post.styleTags.includes(tag)))
+        .filter((item) => !postProductIds.includes(item.id))
+        .sort((left, right) => right.similarityScore - left.similarityScore);
+
+  if (!post) {
+    return <MissingScreen title="帖子不存在" description="这个帖子可能还没有发布，或已被重置。" />;
+  }
+
+  if (post.type === "buyer-request" && post.requestId) {
+    return <RequestDetailPage requestId={post.requestId} />;
+  }
+
+  const liked = state.viewer.likedPostIds.includes(post.id);
+  const saved = state.viewer.savedPostIds.includes(post.id);
+  const followed = seller ? state.viewer.followedSellerIds.includes(seller.id) : false;
+  const bloggerFollowed = blogger ? state.viewer.followedBloggerIds.includes(blogger.id) : false;
+  const postImages = post.images?.length ? post.images : [post.coverImage];
+  const displayImage = activeImage && postImages.includes(activeImage) ? activeImage : postImages[0];
+  const floatingTags =
+    post.productTags?.length
+      ? post.productTags
+      : attachedProducts.slice(0, 2).map((item, index) => ({
+          productId: item.id,
+          label: item.name,
+          x: index === 0 ? 56 : 40,
+          y: index === 0 ? 38 : 60,
+        }));
+
+  return (
+    <LayoutFrame
+      title="帖子"
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-6">
+          <Card className="soft-panel overflow-hidden border-0 bg-white/96 shadow-none">
+            <div className="relative bg-[#f2ece3]">
+              <img src={displayImage} alt={post.title} className="max-h-[760px] min-h-[520px] w-full object-contain" />
+              {floatingTags.map((tag) => {
+                const linkedProduct = resolveProduct(state.products, tag.productId);
+                if (!linkedProduct) {
+                  return null;
+                }
+
+                return (
+                  <Link
+                    key={`${tag.productId}-${tag.label}`}
+                    href={`/products/${tag.productId}`}
+                    className="absolute inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full bg-primary/90 px-3 py-2 text-xs font-semibold text-primary-foreground shadow-[0_14px_34px_-20px_rgba(0,0,0,0.55)] backdrop-blur transition hover:bg-primary"
+                    style={{ left: `${tag.x}%`, top: `${tag.y}%` }}
+                  >
+                    <Package className="size-3.5" />
+                    {tag.label}
+                  </Link>
+                );
+              })}
+            </div>
+            {postImages.length > 1 ? (
+              <div className="flex gap-3 overflow-x-auto border-t border-border/70 px-4 py-3">
+                {postImages.map((image, index) => (
+                  <button
+                    key={`${image}-${index}`}
+                    type="button"
+                    onClick={() => setActiveImage(image)}
+                    className={cn(
+                      "h-20 w-16 shrink-0 overflow-hidden rounded-[14px] border transition",
+                      displayImage === image ? "border-primary" : "border-border/70",
+                    )}
+                  >
+                    <img src={image} alt={`帖子图片 ${index + 1}`} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <CardHeader>
+              {blogger ? (
+                <Link href={`/bloggers/${blogger.id}`} className="mb-2 flex w-fit items-center gap-3 rounded-full pr-3 transition hover:bg-secondary">
+                  <Avatar className="size-11 border border-border/70 bg-secondary">
+                    <AvatarFallback>{blogger.avatar}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-semibold">{blogger.name}</p>
+                    <p className="text-xs text-muted-foreground">穿搭博主</p>
+                  </div>
+                </Link>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {post.styleTags.map((tag) => (
+                  <Badge key={tag} variant="secondary">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+              <CardTitle className="text-4xl">{post.title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="max-w-3xl whitespace-pre-line text-base leading-8 text-foreground/82">{post.body}</p>
+            </CardContent>
+            <CardFooter className="justify-between gap-3 bg-transparent">
+              <button
+                type="button"
+                onClick={() => toggleLike(post.id)}
+                className="inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground transition hover:bg-accent"
+              >
+                <Heart className={cn(liked && "fill-current")} />
+                {liked ? "已点赞" : "点赞"} · {post.likes}
+              </button>
+              <Button variant={saved ? "default" : "outline"} onClick={() => toggleSavePost(post.id)}>
+                <Star data-icon="inline-start" className={cn(saved && "fill-current")} />
+                {saved ? "已收藏" : "收藏帖子"}
+              </Button>
+            </CardFooter>
+          </Card>
+
+          {attachedProducts[0] ? (
+            <Link
+              href={`/try-on?productId=${attachedProducts[0].id}&postId=${post.id}`}
+              className={cn(
+                buttonVariants({ variant: "default" }),
+                "h-16 w-full rounded-[26px] text-lg shadow-[0_18px_44px_-24px_rgba(49,40,27,0.55)]",
+              )}
+            >
+              <Sparkles data-icon="inline-start" />
+              生成同款穿搭
+            </Link>
+          ) : null}
+
+          <ProductRail title="本帖同款" products={attachedProducts} />
+          <ProductRail title="相似风格" products={similarProducts} />
+        </div>
+
+        <div className="space-y-4">
+          {blogger ? (
+            <Card className="soft-panel border-0 bg-white/96 shadow-none">
+              <CardHeader>
+                <CardTitle>穿搭博主</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Link href={`/bloggers/${blogger.id}`} className="flex items-center gap-3 rounded-[22px] border border-border/70 p-3 transition hover:bg-secondary/40">
+                  <Avatar className="size-14 border border-border/70 bg-secondary">
+                    <AvatarFallback>{blogger.avatar}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-lg font-semibold">{blogger.name}</p>
+                    <p className="text-sm text-muted-foreground">{blogger.bio}</p>
+                  </div>
+                </Link>
+                <div className="grid grid-cols-2 gap-3">
+                  <MetricCard label="粉丝" value={blogger.followerCount.toString()} />
+                  <MetricCard label="帖子" value={getBloggerPosts(state.posts, blogger.id).length.toString()} />
+                </div>
+              </CardContent>
+              <CardFooter className="gap-3 bg-transparent">
+                <Button variant={bloggerFollowed ? "default" : "outline"} onClick={() => toggleBloggerFollow(blogger.id)} className="w-full">
+                  <UserPlus data-icon="inline-start" />
+                  {bloggerFollowed ? "已关注博主" : "关注博主"}
+                </Button>
+              </CardFooter>
+            </Card>
+          ) : null}
+
+          {seller ? (
+            <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle>商户信息</CardTitle>
+            </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Avatar className="size-14 border border-border/70 bg-secondary">
+                    <AvatarFallback>{seller.avatar}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-lg font-semibold">{seller.name}</p>
+                    <p className="text-sm text-muted-foreground">{seller.bio}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <MetricCard label="粉丝" value={seller.followerCount.toString()} />
+                  <MetricCard label="收入" value={formatCurrency(seller.revenue)} />
+                </div>
+              </CardContent>
+              <CardFooter className="gap-3 bg-transparent">
+                <Button variant={followed ? "default" : "outline"} onClick={() => toggleFollow(seller.id)} className="w-full">
+                  <UserPlus data-icon="inline-start" />
+                  {followed ? "已关注商户" : "关注商户"}
+                </Button>
+              </CardFooter>
+            </Card>
+          ) : null}
+        </div>
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function ProductDetailPage({ productId }: { productId: string }) {
+  const { state, toggleCartProduct, purchaseProduct, trackView } = useDemo();
+  const [selectedSize, setSelectedSize] = useState("");
+  const [sort, setSort] = useState("similarity");
+  const [purchaseSummary, setPurchaseSummary] = useState<PurchaseSummary>(null);
+  const product = state.products.find((item) => item.id === productId);
+  const seller = resolveSeller(state.sellers, product?.sellerId);
+  const inCart = state.viewer.cartProductIds.includes(productId);
+
+  useEffect(() => {
+    if (productId) {
+      trackView(`product:${productId}`);
+    }
+  }, [productId, trackView]);
+
+  const similarProducts = !product
+    ? []
+    : [
+        ...state.products.filter(
+          (item) => item.id !== product.id && item.tags.some((tag) => product.tags.includes(tag)),
+        ),
+      ].sort((left, right) => {
+        if (sort === "price") {
+          return left.price - right.price;
+        }
+        if (sort === "value") {
+          return right.similarityScore / right.price - left.similarityScore / left.price;
+        }
+        return right.similarityScore - left.similarityScore;
+      });
+
+  if (!product) {
+    return <MissingScreen title="商品不存在" description="这个商品可能被重置了，回社区重新挑一件。" />;
+  }
+
+  const activeProduct = product;
+  const associatedPosts = getProductPosts(state.posts, activeProduct.id);
+  const sizeGuide = getSizeGuide(activeProduct);
+
+  function handlePurchase() {
+    const result = purchaseProduct({ productId: activeProduct.id, size: selectedSize });
+    if (!result) {
+      return;
+    }
+    setPurchaseSummary(result);
+    toast.success("交易成功，订单已经生成。");
+  }
+
+  return (
+    <LayoutFrame
+      title={activeProduct.name}
+      description="选择尺码后可试穿或直接购买。"
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-6">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <div className="grid gap-0 lg:grid-cols-[1.1fr_0.9fr]">
+              <img src={activeProduct.image} alt={activeProduct.name} className="h-[520px] w-full object-cover" />
+              <div className="space-y-6 px-6 py-6">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {activeProduct.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                  <h2 className="text-4xl">{activeProduct.name}</h2>
+                  <p className="text-lg leading-8 text-muted-foreground">{activeProduct.similarityReason}</p>
+                </div>
+                <div className="grid gap-3 rounded-[24px] border border-border/70 bg-secondary/40 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">商户</span>
+                    <span className="font-semibold">{seller?.name ?? "未知商户"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">价格</span>
+                    <span className="text-2xl font-semibold">{formatCurrency(activeProduct.price)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">库存</span>
+                    <span className="font-semibold">{activeProduct.stock}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">材质</span>
+                    <span className="max-w-[220px] text-right text-sm font-semibold">{activeProduct.material ?? "混纺面料"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">相似度</span>
+                    <span className="font-semibold">{activeProduct.similarityScore}%</span>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-muted-foreground">选择尺码</p>
+                  <ToggleGroup
+                    value={selectedSize ? [selectedSize] : []}
+                    onValueChange={(value) => setSelectedSize(value[0] ?? "")}
+                  >
+                    {activeProduct.sizes.map((size) => (
+                      <ToggleGroupItem key={size} value={size}>
+                        {size}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Link href={`/try-on?productId=${activeProduct.id}`} className={cn(buttonVariants({ variant: "outline" }))}>
+                    <Sparkles data-icon="inline-start" />
+                    去 AI 试衣间
+                  </Link>
+                  <Button onClick={handlePurchase}>
+                    <ShoppingBag data-icon="inline-start" />
+                    立即购买
+                  </Button>
+                </div>
+                <Button variant={inCart ? "default" : "secondary"} onClick={() => toggleCartProduct(activeProduct.id)}>
+                  <ShoppingCart data-icon="inline-start" />
+                  {inCart ? "已加入购物车" : "加入购物车"}
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {purchaseSummary ? (
+            <Card className="soft-panel border-0 bg-[linear-gradient(180deg,rgba(53,46,39,0.96),rgba(77,68,57,0.94))] text-primary-foreground shadow-none">
+              <CardHeader>
+                <CardTitle className="text-4xl">交易成功</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <MetricCard label="支付" value={formatCurrency(purchaseSummary.order.amount)} />
+                <MetricCard
+                  label="余额变化"
+                  value={`${formatCurrency(purchaseSummary.balanceBefore)} → ${formatCurrency(purchaseSummary.balanceAfter)}`}
+                />
+                <MetricCard label="库存变化" value={`${purchaseSummary.stockBefore} → ${purchaseSummary.stockAfter}`} />
+                <MetricCard
+                  label="商户收入"
+                  value={`${formatCurrency(purchaseSummary.sellerRevenueBefore)} → ${formatCurrency(
+                    purchaseSummary.sellerRevenueAfter,
+                  )}`}
+                />
+              </CardContent>
+              <CardFooter className="justify-between gap-3 border-white/10 bg-transparent text-primary-foreground">
+                <span>{purchaseSummary.order.id}</span>
+                <span>{purchaseSummary.order.status}</span>
+              </CardFooter>
+            </Card>
+          ) : null}
+
+          {associatedPosts.length > 0 ? (
+            <Card className="soft-panel border-0 bg-white/96 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-3xl">穿搭帖子</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {associatedPosts.map((post) => (
+                    <Link
+                      key={post.id}
+                      href={`/posts/${post.id}`}
+                      className="group overflow-hidden rounded-[24px] border border-border/70 bg-white transition hover:-translate-y-0.5 hover:shadow-[0_18px_42px_-32px_rgba(49,40,27,0.45)]"
+                    >
+                      <img src={post.coverImage} alt={post.title} className="h-64 w-full object-cover" />
+                      <div className="space-y-2 p-4">
+                        <p className="line-clamp-2 font-semibold leading-6">{post.title}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {post.styleTags.slice(0, 3).map((tag) => (
+                            <span key={tag} className="text-xs text-muted-foreground">
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <SimilarProductList products={similarProducts} sort={sort} onSortChange={setSort} />
+        </div>
+
+        <div className="space-y-4">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle>尺码与材质</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="overflow-hidden rounded-[22px] border border-border/70">
+                <div className="grid grid-cols-4 bg-secondary/60 px-4 py-3 text-xs font-semibold text-muted-foreground">
+                  <span>尺码</span>
+                  <span>肩宽</span>
+                  <span>胸围</span>
+                  <span>衣长</span>
+                </div>
+                {sizeGuide.map((row) => (
+                  <div key={row.size} className="grid grid-cols-4 border-t border-border/70 px-4 py-3 text-sm">
+                    <span className="font-semibold">{row.size}</span>
+                    <span>{row.shoulder}</span>
+                    <span>{row.chest}</span>
+                    <span>{row.length}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-[22px] border border-border/70 px-4 py-4">
+                <p className="text-sm text-muted-foreground">材质</p>
+                <p className="mt-2 leading-7">{activeProduct.material ?? "混纺面料，适合日常穿搭。"}</p>
+              </div>
+              <div className="rounded-[22px] border border-border/70 px-4 py-4">
+                <p className="text-sm text-muted-foreground">护理</p>
+                <p className="mt-2 leading-7">{activeProduct.care ?? "建议低温洗涤，悬挂晾干。"}</p>
+              </div>
+              <div className="rounded-[22px] border border-border/70 px-4 py-4">
+                <p className="text-sm text-muted-foreground">相似理由</p>
+                <p className="mt-2 leading-7">{activeProduct.similarityReason}</p>
+              </div>
+              <div className="rounded-[22px] border border-border/70 px-4 py-4">
+                <p className="text-sm text-muted-foreground">风格标签</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {activeProduct.tags.map((tag) => (
+                    <Badge key={tag} variant="secondary">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+    </LayoutFrame>
+  );
+}
+
+export function SellPage() {
+  const { state, addProduct, publishSellerPost, approveCollabRequest } = useDemo();
+  const router = useRouter();
+  const [form, setForm] = useState({
+    sellerId: state.sellers[0]?.id ?? seedSellers[0].id,
+    name: "",
+    price: "189",
+    stock: "3",
+    sizes: "S,M,L",
+    material: "棉混纺斜纹布，挺阔微哑光表面",
+    tags: "高街暗黑,短夹克,通勤",
+    image: seedProducts[0].image,
+  });
+  const [productImages, setProductImages] = useState<string[]>([seedProducts[0].image]);
+  const [createdProduct, setCreatedProduct] = useState<Product | null>(null);
+  const [draft, setDraft] = useState<AIStyledPostDraft | null>(null);
+  const [invitedBloggerId, setInvitedBloggerId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const recommendedBloggers = getRecommendedBloggers(createdProduct, state.bloggers);
+  const pendingCollabRequests = state.collabRequests.filter((request) => request.status === "pending");
+
+  async function createProduct() {
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/seller/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, image: productImages[0] ?? form.image }),
+      });
+      const product = (await response.json()) as Product;
+      addProduct(product);
+      setCreatedProduct(product);
+      toast.success("商品已上架，可以生成帖子了。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function generateDraft() {
+    if (!createdProduct) {
+      toast.error("请先上架商品。");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/seller/posts/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productId: createdProduct.id,
+          sellerId: createdProduct.sellerId,
+          product: createdProduct,
+        }),
+      });
+      const payload = (await response.json()) as AIStyledPostDraft;
+      setDraft(payload);
+      toast.success("AI 穿搭帖草稿已生成。");
+    } catch {
+      toast.error("生成失败，已回退到模板方案。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function publishDraft() {
+    if (!createdProduct || !draft) {
+      toast.error("请先生成帖子草稿。");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await fetch("/api/seller/posts/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId: createdProduct.id, draft }),
+      });
+      publishSellerPost(createdProduct, draft);
+      toast.success("帖子已发布到社区首页。");
+      router.push("/");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function inviteBlogger(blogger: Blogger) {
+    if (!createdProduct) {
+      toast.error("请先上架商品。");
+      return;
+    }
+
+    setInvitedBloggerId(blogger.id);
+    toast.success(`已邀请 ${blogger.name} 做商单。`);
+  }
+
+  return (
+    <LayoutFrame
+      mode="seller"
+      title="商户发布"
+      description="上架商品，生成 AI 穿搭帖并发布到社区。"
+      actions={
+        <>
+          <Link href="/seller/products" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Package data-icon="inline-start" />
+            商品
+          </Link>
+          <Link href="/seller/posts" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Shirt data-icon="inline-start" />
+            帖子
+          </Link>
+          <Link href="/" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Home data-icon="inline-start" />
+            切回用户
+          </Link>
+        </>
+      }
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <Card className="soft-panel border-0 bg-white/96 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-3xl">1. 商品上架</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <label className="flex flex-col gap-2 text-sm">
+              商户
+              <select
+                value={form.sellerId}
+                onChange={(event) => setForm((current) => ({ ...current, sellerId: event.target.value }))}
+                className="h-11 rounded-2xl border border-input bg-background px-4"
+              >
+                {state.sellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>
+                    {seller.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              商品名
+              <Input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如 Urban 黑色短夹克" />
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              价格
+              <Input value={form.price} onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))} />
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              库存
+              <Input value={form.stock} onChange={(event) => setForm((current) => ({ ...current, stock: event.target.value }))} />
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              尺码
+              <Input value={form.sizes} onChange={(event) => setForm((current) => ({ ...current, sizes: event.target.value }))} placeholder="S,M,L" />
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              材质
+              <Input value={form.material} onChange={(event) => setForm((current) => ({ ...current, material: event.target.value }))} />
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              风格标签
+              <Input value={form.tags} onChange={(event) => setForm((current) => ({ ...current, tags: event.target.value }))} placeholder="高街暗黑,短夹克,通勤" />
+            </label>
+            <div className="md:col-span-2">
+              <LocalImageUploader label="上传商品图片" images={productImages} onChange={setProductImages} multiple={false} />
+            </div>
+          </CardContent>
+          <CardFooter className="justify-end gap-3 bg-transparent">
+            <Button onClick={createProduct} disabled={submitting || !form.name.trim()}>
+              {submitting ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <ShoppingBag data-icon="inline-start" />}
+              上架商品
+            </Button>
+          </CardFooter>
+        </Card>
+
+        <div className="space-y-4">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-3xl">待确认商单</CardTitle>
+              <CardDescription>博主发送样图和帖子信息后，商户在这里确认合作并发布带货帖。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {pendingCollabRequests.length ? (
+                pendingCollabRequests.map((request) => {
+                  const product = resolveProduct(state.products, request.productId);
+                  const blogger = resolveBlogger(state.bloggers, request.bloggerId);
+
+                  return (
+                    <div key={request.id} className="rounded-[24px] border border-border/70 p-4">
+                      <img src={request.coverImage} alt={request.title} className="h-52 w-full rounded-[18px] object-cover" />
+                      <div className="mt-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold">{request.title}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {blogger?.name ?? "博主"} · {product?.name ?? "商品"}
+                            </p>
+                          </div>
+                          <Badge>{formatCurrency(request.suggestedPrice)}</Badge>
+                        </div>
+                        <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">{request.body}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {request.tags.map((tag) => (
+                            <Badge key={tag} variant="secondary">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                        <Button onClick={() => approveCollabRequest(request.id)} className="w-full">
+                          <ArrowRight data-icon="inline-start" />
+                          确认合作并发布
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <EmptyState label="暂无待确认商单。博主在发布页发送后会出现在这里。" />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-3xl">2. 生成穿搭帖</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {createdProduct ? (
+                <div className="rounded-[24px] border border-border/70 p-4">
+                  <img src={createdProduct.image} alt={createdProduct.name} className="h-48 w-full rounded-[18px] object-cover" />
+                  <div className="mt-4 space-y-2">
+                    <p className="text-xl font-semibold">{createdProduct.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {formatCurrency(createdProduct.price)} · 库存 {createdProduct.stock} · {createdProduct.tags.join(" / ")}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+                  先完成商品上架，右侧才能生成对应的 AI 穿搭帖。
+                </div>
+              )}
+
+              {draft ? (
+                <div className="rounded-[24px] border border-border/70 bg-secondary/40 p-4">
+                  <img src={draft.modelImage} alt={draft.title} className="h-56 w-full rounded-[18px] object-cover" />
+                  <p className="mt-4 text-2xl font-semibold">{draft.title}</p>
+                  <p className="mt-2 text-sm leading-7 text-muted-foreground">{draft.caption}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {draft.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </CardContent>
+            <CardFooter className="flex-col gap-3 bg-transparent">
+              <Button onClick={generateDraft} disabled={submitting || !createdProduct} className="w-full">
+                <Sparkles data-icon="inline-start" />
+                一键生成穿搭帖
+              </Button>
+              <Button onClick={publishDraft} disabled={submitting || !createdProduct || !draft} variant="outline" className="w-full">
+                <ArrowRight data-icon="inline-start" />
+                发布到社区
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-3xl">3. 推荐博主商单</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {recommendedBloggers.map(({ blogger, score }) => {
+                const invited = invitedBloggerId === blogger.id;
+
+                return (
+                  <div key={blogger.id} className="rounded-[24px] border border-border/70 p-4">
+                    <div className="flex items-start gap-3">
+                      <Avatar className="size-12 border border-border/70 bg-secondary">
+                        <AvatarFallback>{blogger.avatar}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <Link href={`/bloggers/${blogger.id}`} className="font-semibold hover:underline">
+                              {blogger.name}
+                            </Link>
+                            <p className="mt-1 text-xs text-muted-foreground">风格匹配 {score}%</p>
+                          </div>
+                          <Badge variant={invited ? "default" : "secondary"}>{invited ? "已邀请" : "推荐"}</Badge>
+                        </div>
+                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{blogger.bio}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {blogger.styleTags.slice(0, 3).map((tag) => (
+                            <Badge key={tag} variant="secondary">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          <Button variant="outline" onClick={() => inviteBlogger(blogger)} disabled={!createdProduct}>
+                            邀请做商单
+                          </Button>
+                          <div className="rounded-2xl bg-secondary/50 px-4 py-2 text-sm text-muted-foreground">
+                            {invited ? "等待博主发送样图请求" : "邀请后由博主发起请求"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function AnalyzePage() {
+  const { addRequest } = useDemo();
+  const router = useRouter();
+  const [linkInput, setLinkInput] = useState("https://www.xiaohongshu.com/explore/ootd-clean-fit");
+  const [coverImage, setCoverImage] = useState(buildStyleAnalysis("demo").coverImage);
+  const [description, setDescription] = useState("喜欢这条内容的 clean fit 通勤氛围，想找更接近的宽松西装或针织。");
+  const [analysis, setAnalysis] = useState<StyleAnalysis | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function runAnalysis() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/analyze/xhs-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ link: linkInput, coverImage }),
+      });
+      const payload = (await response.json()) as StyleAnalysis;
+      setAnalysis(payload);
+      toast.success("风格分析已生成。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function publishRequest() {
+    if (!analysis) {
+      toast.error("请先完成风格分析。");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          coverImage,
+          description,
+          tags: analysis.styleTags,
+          expectedItem: "宽松西装或针织",
+          budget: 220,
+          matchedProducts: analysis.matchedProducts,
+        }),
+      });
+      const payload = (await response.json()) as { request: RequestPost; post: Post };
+      addRequest(payload.request, payload.post);
+      toast.success("征集帖已发布，商户响应已生成。");
+      router.push(`/requests/${payload.request.id}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <LayoutFrame
+      title="链接找款"
+      description="粘贴分享链接，确认封面后查找相似商品。"
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <Card className="soft-panel border-0 bg-white/96 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-3xl">链接解析入口</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <label className="flex flex-col gap-2 text-sm">
+              小红书分享链接
+              <Input value={linkInput} onChange={(event) => setLinkInput(event.target.value)} />
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              手动确认封面图
+              <Input value={coverImage} onChange={(event) => setCoverImage(event.target.value)} />
+            </label>
+            <label className="flex flex-col gap-2 text-sm">
+              用户补充描述
+              <Textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-28" />
+            </label>
+            <Button onClick={runAnalysis} disabled={loading} className="w-full">
+              {loading ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Search data-icon="inline-start" />}
+              开始风格分析
+            </Button>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          {analysis ? (
+            <>
+              <Card className="soft-panel border-0 bg-white/96 shadow-none">
+                <CardHeader>
+                  <CardTitle>风格分析结果</CardTitle>
+                  <CardDescription>{analysis.summary}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <img src={analysis.coverImage} alt="解析封面" className="h-60 w-full rounded-[22px] object-cover" />
+                  <div className="flex flex-wrap gap-2">
+                    {analysis.styleTags.map((tag) => (
+                      <Badge key={tag} variant="secondary">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="grid gap-3">
+                    {analysis.matchedProducts.map((productId) => {
+                      const product = resolveProduct(seedProducts, productId);
+                      if (!product) {
+                        return null;
+                      }
+
+                      return (
+                        <Link
+                          key={product.id}
+                          href={`/products/${product.id}`}
+                          className="flex items-center justify-between rounded-[22px] border border-border/70 px-4 py-4 transition hover:bg-secondary/40"
+                        >
+                          <div>
+                            <p className="font-semibold">{product.name}</p>
+                            <p className="text-sm text-muted-foreground">{product.similarityScore}% 相似度 · {formatCurrency(product.price)}</p>
+                          </div>
+                          <ArrowRight />
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+                <CardFooter className="flex-col gap-3 bg-transparent">
+                  <Link href={`/try-on?productId=${analysis.matchedProducts[0]}`} className={cn(buttonVariants({ variant: "default" }), "w-full")}>
+                    进 AI 试衣间
+                  </Link>
+                  <Button variant="outline" className="w-full" onClick={publishRequest}>
+                    <Star data-icon="inline-start" />
+                    没找到满意款，发布征集帖
+                  </Button>
+                </CardFooter>
+              </Card>
+            </>
+          ) : (
+            <Card className="soft-panel border-0 bg-white/96 shadow-none">
+              <CardHeader>
+                <CardTitle>分析结果</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-[24px] border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                  粘贴链接并确认封面图后，这里会展示风格标签、相似商品和试穿入口。
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function RequestDetailPage({ requestId }: { requestId: string }) {
+  const { state, trackView } = useDemo();
+  const request = state.requests.find((item) => item.id === requestId);
+
+  useEffect(() => {
+    if (requestId) {
+      trackView(`request:${requestId}`);
+    }
+  }, [requestId, trackView]);
+
+  if (!request) {
+    return <MissingScreen title="征集帖不存在" description="可能已经被重置。回社区再发一次需求即可。" />;
+  }
+
+  return (
+    <LayoutFrame
+      title={`征集：${request.expectedItem}`}
+      description="查看商户响应，选择商品继续成交。"
+    >
+      <section className="space-y-6">
+        <div className="space-y-6">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <div className="grid gap-0 lg:grid-cols-[1fr_0.95fr]">
+              <img src={request.image} alt={request.expectedItem} className="h-[420px] w-full object-cover" />
+              <div className="space-y-5 px-6 py-6">
+                <div>
+                  <p className="editorial-kicker">Buyer Request</p>
+                  <h2 className="mt-3 text-4xl">{request.expectedItem}</h2>
+                  <p className="mt-4 text-base leading-7 text-muted-foreground">{request.description}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <MetricCard label="预算" value={formatCurrency(request.budget)} />
+                  <MetricCard label="商户响应" value={request.matchedOffers.length.toString()} />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {request.tags.map((tag) => (
+                    <Badge key={tag} variant="secondary">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <div className="space-y-4">
+            <div>
+              <p className="editorial-kicker">Seller Offers</p>
+              <h3 className="text-4xl">商户响应 / 报价</h3>
+            </div>
+            <div className="grid gap-4">
+              {request.matchedOffers.map((offer) => {
+                const seller = resolveSeller(state.sellers, offer.sellerId);
+                const product = resolveProduct(state.products, offer.productId);
+
+                if (!seller || !product) {
+                  return null;
+                }
+
+                return (
+                  <Card key={`${offer.sellerId}-${offer.productId}`} className="soft-panel border-0 bg-white/96 shadow-none">
+                    <CardContent className="grid gap-4 py-4 md:grid-cols-[170px_minmax(0,1fr)_140px]">
+                      <img src={product.image} alt={product.name} className="h-40 w-full rounded-[20px] object-cover" />
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-2xl font-semibold">{product.name}</p>
+                          <p className="mt-1 text-sm text-muted-foreground">{seller.name} · {seller.styleFocus}</p>
+                        </div>
+                        <p className="text-sm leading-7 text-muted-foreground">{offer.note}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {product.tags.map((tag) => (
+                            <Badge key={tag} variant="secondary">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-col justify-between gap-4">
+                        <div className="rounded-[20px] bg-secondary/60 p-4">
+                          <p className="text-sm text-muted-foreground">报价 / 相似度</p>
+                          <p className="mt-2 text-xl font-semibold">{formatCurrency(offer.price)}</p>
+                          <p className="text-sm text-muted-foreground">{offer.similarityScore}%</p>
+                        </div>
+                        <Link href={`/products/${product.id}`} className={cn(buttonVariants({ variant: "default" }), "w-full")}>
+                          进商品成交
+                        </Link>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function TryOnRoomPage() {
+  const { state, publishUserPost, submitCollabRequest } = useDemo();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
+  const initialProductId = searchParams.get("productId") ?? state.products[0]?.id ?? "";
+  const isCommission = searchParams.get("commission") === "1";
+  const [selectedProductId, setSelectedProductId] = useState(initialProductId);
+  const [personalImages, setPersonalImages] = useState<string[]>([currentBlogger?.coverImage ?? seedProducts[0].tryOnPreset]);
+  const [generatingTryOn, setGeneratingTryOn] = useState(false);
+  const selectedProduct = resolveProduct(state.products, selectedProductId) ?? state.products[0];
+  const seller = resolveSeller(state.sellers, selectedProduct?.sellerId);
+  const overlap = selectedProduct && currentBlogger
+    ? currentBlogger.styleTags.filter((tag) => selectedProduct.tags.includes(tag)).length
+    : 1;
+  const fitScore = Math.min(98, 80 + overlap * 7);
+  const realFollowers = getCurrentUserFollowers(state.bloggers);
+  const realFollowerCount = realFollowers.length;
+  const suggestedPrice = Math.round((120 + realFollowerCount * 0.55 + fitScore * 1.8) / 10) * 10;
+  const commissionUnlocked = realFollowerCount > 1000;
+  const [resultImages, setResultImages] = useState<string[]>([selectedProduct?.tryOnPreset ?? seedProducts[0].tryOnPreset]);
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const resultImage = resultImages[activeResultIndex] ?? resultImages[0];
+  const [title, setTitle] = useState(`${currentBlogger?.name ?? "我"} 的 ${selectedProduct?.tags[0] ?? "AI"} 穿搭`);
+  const [body, setBody] = useState(
+    selectedProduct
+      ? `使用个人形象和 ${selectedProduct.name} 生成的 AI 试穿图，风格重点是 ${selectedProduct.tags.join(" / ")}。`
+      : "使用个人形象和商品生成 AI 试穿图。",
+  );
+  const [tags, setTags] = useState(
+    selectedProduct
+      ? [...new Set([...(currentBlogger?.styleTags ?? []), ...selectedProduct.tags])].slice(0, 5).join(",")
+      : "AI试穿",
+  );
+
+  function selectProduct(productId: string) {
+    const nextProduct = resolveProduct(state.products, productId);
+    setSelectedProductId(productId);
+    if (!nextProduct) {
+      return;
+    }
+    setResultImages([nextProduct.tryOnPreset]);
+    setActiveResultIndex(0);
+    setTitle(`${currentBlogger?.name ?? "我"} 的 ${nextProduct.tags[0] ?? "AI"} 穿搭`);
+    setBody(`使用个人形象和 ${nextProduct.name} 生成的 AI 试穿图，风格重点是 ${nextProduct.tags.join(" / ")}。`);
+    setTags([...new Set([...(currentBlogger?.styleTags ?? []), ...nextProduct.tags])].slice(0, 5).join(","));
+  }
+
+  async function generateTryOn() {
+    if (!selectedProduct) {
+      toast.error("请先选择衣服。");
+      return;
+    }
+
+    setGeneratingTryOn(true);
+    setResultImages([]);
+    setActiveResultIndex(0);
+    try {
+      const maxImages = Math.min(Math.max(personalImages.length, 1), 6);
+      const response = await fetch("/api/try-on", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productId: selectedProduct.id,
+          productName: selectedProduct.name,
+          productTags: selectedProduct.tags,
+          productImage: selectedProduct.image,
+          sourceImages: personalImages,
+          maxImages,
+        }),
+      });
+      const payload = (await response.json()) as { status: string; images?: string[]; resultImage?: string; error?: string };
+      const presets = [
+        selectedProduct.tryOnPreset,
+        selectedProduct.detailImages[1] ?? selectedProduct.image,
+        selectedProduct.detailImages[0] ?? selectedProduct.tryOnPreset,
+      ];
+      const fallbackImages = (personalImages.length ? personalImages : [currentBlogger?.coverImage ?? selectedProduct.image]).map(
+        (_, index) => presets[index % presets.length],
+      );
+      const nextImages = payload.images?.length ? payload.images : payload.resultImage ? [payload.resultImage] : fallbackImages;
+
+      for (const image of nextImages) {
+        await new Promise((resolve) => window.setTimeout(resolve, 320));
+        setResultImages((current) => [...current, image].slice(0, 9));
+      }
+      if (payload.status === "fallback") {
+        toast.error(payload.error ? `真实生成失败，已使用预设图：${payload.error}` : "真实生成失败，已使用预设图。");
+      } else {
+        toast.success(`Seedream 已生成 ${nextImages.length} 张 AI 试穿图。`);
+      }
+    } catch {
+      setResultImages([]);
+      setActiveResultIndex(0);
+      await new Promise((resolve) => window.setTimeout(resolve, 320));
+      setResultImages([selectedProduct.tryOnPreset]);
+      toast.error("真实生成请求失败，已使用预设图。");
+    } finally {
+      setGeneratingTryOn(false);
+    }
+  }
+
+  function publishAiPost() {
+    if (!selectedProduct || !resultImages.length) {
+      toast.error("请先生成试穿图。");
+      return;
+    }
+    const post = publishUserPost({
+      title,
+      body,
+      coverImage: resultImages[0],
+      images: resultImages,
+      tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      productIds: [selectedProduct.id],
+    });
+    router.push(`/posts/${post.id}`);
+  }
+
+  function sendToSeller() {
+    if (!commissionUnlocked) {
+      toast.error("粉丝数大于 1000 才能发送商单合作。");
+      return;
+    }
+    if (!selectedProduct || !resultImages.length) {
+      toast.error("请先生成试穿图。");
+      return;
+    }
+    submitCollabRequest({
+      sellerId: selectedProduct.sellerId,
+      productId: selectedProduct.id,
+      bloggerId: currentBlogger.id,
+      title,
+      body,
+      coverImage: resultImages[0],
+      tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      suggestedPrice,
+      fitScore,
+    });
+    router.push("/create");
+  }
+
+  return (
+    <LayoutFrame
+      title="AI 试衣间"
+      actions={
+        <Link href={isCommission ? "/create" : "/products"} className={cn(buttonVariants({ variant: "outline" }))}>
+          <Home data-icon="inline-start" />
+          返回
+        </Link>
+      }
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="space-y-6">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-3xl">选择形象和衣服</CardTitle>
+              <CardDescription>从商品页或帖子进入时，会默认带入对应服装。</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-5 md:grid-cols-2">
+              <div>
+                <LocalImageUploader label="上传个人形象" images={personalImages} onChange={setPersonalImages} />
+              </div>
+              <label className="rounded-[26px] border border-border/70 p-4 text-sm">
+                要试穿的衣服
+                <select
+                  value={selectedProductId}
+                  onChange={(event) => selectProduct(event.target.value)}
+                  className="mt-3 h-11 w-full rounded-2xl border border-input bg-background px-4"
+                >
+                  {state.products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedProduct ? (
+                  <img src={selectedProduct.image} alt={selectedProduct.name} className="mt-4 h-72 w-full rounded-[20px] object-cover" />
+                ) : null}
+              </label>
+            </CardContent>
+            <CardFooter className="justify-end bg-transparent">
+              <Button onClick={generateTryOn} disabled={generatingTryOn}>
+                {generatingTryOn ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
+                {generatingTryOn ? "正在调用 Seedream" : "生成试穿图"}
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-3xl">{isCommission ? "商单帖子信息" : "发布为穿搭帖"}</CardTitle>
+              <CardDescription>
+                {isCommission ? "编辑标题、正文和标签后发送给商户，由商户端确认合作并发布。" : "生成结果可以直接发布成带商品标签的穿搭帖。"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <label className="flex flex-col gap-2 text-sm">
+                标题
+                <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+              </label>
+              <label className="flex flex-col gap-2 text-sm">
+                正文
+                <Textarea value={body} onChange={(event) => setBody(event.target.value)} rows={5} />
+              </label>
+              <label className="flex flex-col gap-2 text-sm">
+                标签
+                <Input value={tags} onChange={(event) => setTags(event.target.value)} />
+              </label>
+              <LocalImageUploader label="编辑 / 补充试穿结果图" images={resultImages} onChange={setResultImages} />
+              {isCommission ? (
+                <div className="grid gap-3 rounded-[22px] bg-secondary/50 p-4 sm:grid-cols-2">
+                  <MetricCard label="适配度" value={`${fitScore}%`} />
+                  <MetricCard label="建议报价" value={formatCurrency(suggestedPrice)} />
+                  <MetricCard label="粉丝门槛" value={`${realFollowerCount}/1000`} />
+                  <MetricCard label="商单状态" value={commissionUnlocked ? "已解锁" : "未解锁"} />
+                </div>
+              ) : null}
+            </CardContent>
+            <CardFooter className="justify-end bg-transparent">
+              <Button onClick={isCommission ? sendToSeller : publishAiPost} disabled={!title.trim() || !resultImages.length || (isCommission && !commissionUnlocked)}>
+                <ArrowRight data-icon="inline-start" />
+                {isCommission ? "确定并发送给商家" : "发布 AI 穿搭帖"}
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+
+        <aside className="space-y-4">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none lg:sticky lg:top-24">
+            <CardHeader>
+              <CardTitle>试穿结果</CardTitle>
+              <CardDescription>{seller?.name ?? "商户"} · {selectedProduct?.name ?? "商品"}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {resultImage ? (
+                <img src={resultImage} alt="AI 试穿结果" className="h-[580px] w-full rounded-[28px] object-cover" />
+              ) : (
+                <div className="flex h-[580px] items-center justify-center rounded-[28px] border border-dashed border-border bg-secondary/40">
+                  <div className="text-center text-sm text-muted-foreground">
+                    <LoaderCircle className="mx-auto mb-3 animate-spin" />
+                    Seedream 正在生成，图片会逐张出现在这里。
+                  </div>
+                </div>
+              )}
+              {resultImages.length > 1 ? (
+                <div className="flex gap-3 overflow-x-auto pb-1">
+                  {resultImages.map((image, index) => (
+                    <button
+                      key={`${image}-${index}`}
+                      type="button"
+                      onClick={() => setActiveResultIndex(index)}
+                      className={cn(
+                        "h-20 w-16 shrink-0 overflow-hidden rounded-[14px] border",
+                        index === activeResultIndex ? "border-primary" : "border-border/70",
+                      )}
+                    >
+                      <img src={image} alt={`试穿结果 ${index + 1}`} className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {(tags ? tags.split(",") : selectedProduct?.tags ?? []).map((tag) => (
+                  <Badge key={tag.trim()} variant="secondary">
+                    {tag.trim()}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function CreatePage() {
+  const { state, publishUserPost } = useDemo();
+  const router = useRouter();
+  const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
+  const [title, setTitle] = useState("今天的通勤 Clean Fit");
+  const [body, setBody] = useState("用一件干净的外套搭配利落下装，整体适合日常通勤和周末出门。");
+  const [tags, setTags] = useState("Clean Fit,通勤,极简");
+  const [postImages, setPostImages] = useState<string[]>([currentBlogger?.coverImage ?? seedProducts[0].tryOnPreset]);
+  const realFollowers = getCurrentUserFollowers(state.bloggers);
+  const realFollowerCount = realFollowers.length;
+  const commissionUnlocked = realFollowerCount > 1000;
+  const commissionCards = state.products.slice(0, 6).map((product, index) => {
+    const seller = resolveSeller(state.sellers, product.sellerId);
+    const overlap = currentBlogger
+      ? currentBlogger.styleTags.filter((tag) => product.tags.includes(tag)).length
+      : 1;
+    const fitScore = Math.min(98, 78 + overlap * 7 + (index % 3) * 3);
+    const suggestedPrice = Math.round((120 + realFollowerCount * 0.55 + fitScore * 1.8) / 10) * 10;
+
+    return {
+      id: `commission-${product.id}`,
+      product,
+      seller,
+      fitScore,
+      suggestedPrice,
+      requirement: `寻找 ${product.tags.slice(0, 2).join(" / ")} 风格的图文带货帖。`,
+    };
+  });
+
+  function publishTraditionalPost() {
+    const coverImage = postImages[0];
+    if (!coverImage) {
+      toast.error("请先上传至少一张帖子图片。");
+      return;
+    }
+
+    const post = publishUserPost({
+      title,
+      body,
+      coverImage,
+      images: postImages,
+      tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+    });
+    router.push(`/posts/${post.id}`);
+  }
+
+  return (
+    <LayoutFrame
+      title="发图文"
+      actions={
+        <Link href="/me" className={cn(buttonVariants({ variant: "outline" }))}>
+          <Home data-icon="inline-start" />
+          返回我的
+        </Link>
+      }
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="space-y-6">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-3xl">发布图文</CardTitle>
+              <CardDescription>上传多张本地图片，填写标题、正文和标签后发布到社区。</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <LocalImageUploader label="上传帖子图片" images={postImages} onChange={setPostImages} />
+              <label className="flex flex-col gap-2 text-sm">
+                标题
+                <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+              </label>
+              <label className="flex flex-col gap-2 text-sm">
+                正文
+                <Textarea value={body} onChange={(event) => setBody(event.target.value)} rows={5} />
+              </label>
+              <label className="flex flex-col gap-2 text-sm">
+                标签
+                <Input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Clean Fit,通勤" />
+              </label>
+              <Button onClick={publishTraditionalPost} disabled={!title.trim() || !postImages.length}>
+                <ArrowRight data-icon="inline-start" />
+                发布图文
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-3xl">商单广场</CardTitle>
+                  <CardDescription>粉丝数大于 1000 后解锁，系统按适配度和粉丝数给出建议报价。</CardDescription>
+                </div>
+                <Badge variant={commissionUnlocked ? "default" : "secondary"}>
+                  {commissionUnlocked ? `已解锁 · ${realFollowerCount} 粉` : `未解锁 · ${realFollowerCount}/1000`}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              {commissionCards.map((card) => (
+                <div key={card.id} className={cn("rounded-[26px] border border-border/70 bg-white p-4", !commissionUnlocked && "opacity-70")}>
+                  <img src={card.product.image} alt={card.product.name} className="h-52 w-full rounded-[20px] object-cover" />
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{card.product.name}</p>
+                        <p className="text-sm text-muted-foreground">{card.seller?.name ?? "商户"}</p>
+                      </div>
+                      <Badge>{card.fitScore}% 适配</Badge>
+                    </div>
+                    <p className="text-sm leading-6 text-muted-foreground">{card.requirement}</p>
+                    <div className="rounded-[18px] bg-secondary/60 px-4 py-3">
+                      <p className="text-xs text-muted-foreground">智能阶梯报价</p>
+                      <p className="mt-1 text-2xl font-semibold">{formatCurrency(card.suggestedPrice)}</p>
+                    </div>
+                    <div className="grid gap-2">
+                      {commissionUnlocked ? (
+                        <Link href={`/try-on?productId=${card.product.id}&commission=1`} className={cn(buttonVariants({ variant: "outline" }))}>
+                          <Sparkles data-icon="inline-start" />
+                          生成穿搭图
+                        </Link>
+                      ) : (
+                        <Button variant="outline" disabled>
+                          <Lock data-icon="inline-start" />
+                          1000 粉后解锁
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        <aside className="space-y-4">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none lg:sticky lg:top-24">
+            <CardHeader>
+              <CardTitle>发布预览</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <img
+                src={postImages[0] ?? currentBlogger?.coverImage}
+                alt="发布预览"
+                className="h-[520px] w-full rounded-[26px] object-cover"
+              />
+              <div>
+                <p className="text-xl font-semibold">{title}</p>
+                <p className="mt-2 line-clamp-4 text-sm leading-6 text-muted-foreground">{body}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      </section>
+    </LayoutFrame>
+  );
+}
+
+export function MePage() {
+  const { state } = useDemo();
+  const [listType, setListType] = useState<"following" | "followers" | null>(null);
+  const [activeProfileSection, setActiveProfileSection] = useState<"published" | "liked" | "saved">("published");
+  const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? {
+    id: "blogger-me",
+    name: "游客用户",
+    avatar: "ME",
+    bio: "",
+    followerCount: 0,
+    styleTags: [],
+    coverImage: "",
+  };
+  const publishedPosts = getBloggerPosts(state.posts, currentBlogger.id);
+  const likedPosts = state.posts.filter((post) => state.viewer.likedPostIds.includes(post.id));
+  const savedPosts = state.posts.filter((post) => state.viewer.savedPostIds.includes(post.id));
+  const followedBloggers = state.bloggers.filter((blogger) => state.viewer.followedBloggerIds.includes(blogger.id));
+  const followedSellers = state.sellers.filter((seller) => state.viewer.followedSellerIds.includes(seller.id));
+  const realFollowers = getCurrentUserFollowers(state.bloggers);
+  const realFollowerCount = realFollowers.length;
+  const receivedLikes = publishedPosts.reduce((sum, post) => sum + post.likes, 0);
+  const followingCount = followedBloggers.length + followedSellers.length;
+  const activeSections: Record<typeof activeProfileSection, ProfileSection> = {
+    published: {
+      key: "likedPosts",
+      title: "发布的帖子",
+      count: publishedPosts.length,
+      emptyLabel: "还没有发布帖子，点击顶部发布按钮创建第一篇。",
+      content: (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {publishedPosts.map((post) => (
+            <PostMiniCard key={post.id} post={post} />
+          ))}
+        </div>
+      ),
+    },
+    liked: {
+      key: "likedPosts",
+      title: "点赞的帖子",
+      count: likedPosts.length,
+      emptyLabel: "还没有点赞的帖子，先去社区逛逛。",
+      content: (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {likedPosts.map((post) => (
+            <PostMiniCard key={post.id} post={post} />
+          ))}
+        </div>
+      ),
+    },
+    saved: {
+      key: "savedPosts",
+      title: "收藏的帖子",
+      count: savedPosts.length,
+      emptyLabel: "还没有收藏帖子，进入帖子详情页可收藏。",
+      content: (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {savedPosts.map((post) => (
+            <PostMiniCard key={post.id} post={post} />
+          ))}
+        </div>
+      ),
+    },
+  };
+  const switchItems = [
+    { id: "published" as const, label: "发布的帖子", count: publishedPosts.length },
+    { id: "liked" as const, label: "点赞的帖子", count: likedPosts.length },
+    { id: "saved" as const, label: "收藏的帖子", count: savedPosts.length },
+  ];
+  const activeSectionIndex = switchItems.findIndex((item) => item.id === activeProfileSection);
+  const activeSection = activeSections[activeProfileSection];
+
+  return (
+    <>
+      <ProfilePageShell
+        title="我的"
+        avatar={currentBlogger.avatar}
+        name={currentBlogger.name}
+        subtitle="本人视角 · 用户主页"
+        actions={
+          <Link href="/settings" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Settings data-icon="inline-start" />
+            可见度设置
+          </Link>
+        }
+        stats={[
+          { label: "关注", value: followingCount.toString(), onClick: () => setListType("following") },
+          { label: "粉丝", value: realFollowerCount.toString(), onClick: () => setListType("followers") },
+          { label: "帖子数", value: publishedPosts.length.toString() },
+          { label: "收到点赞", value: receivedLikes.toString() },
+        ]}
+        visibility={activeProfileSection === "published" ? undefined : state.viewer.sectionVisibility}
+        sections={[
+          {
+            key: activeSection.key,
+            title: "我的内容",
+            count: activeSection.count,
+            emptyLabel: activeSection.emptyLabel,
+            forceContent: true,
+            content: (
+              <div className="space-y-6">
+                <div className="relative overflow-hidden rounded-[30px] border border-border/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(238,231,218,0.72))] p-2 shadow-[0_18px_50px_-34px_rgba(49,40,27,0.65)]">
+                  <div
+                    className="absolute bottom-2 top-2 rounded-[24px] bg-primary shadow-[0_18px_32px_-20px_rgba(49,40,27,0.7)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                    style={{
+                      width: "calc((100% - 1rem) / 3)",
+                      transform: `translateX(calc(${activeSectionIndex} * (100% + 0.5rem)))`,
+                    }}
+                  />
+                  <div className="relative grid grid-cols-3 gap-2">
+                    {switchItems.map((item) => {
+                      const active = activeProfileSection === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setActiveProfileSection(item.id)}
+                          className={cn(
+                            "rounded-[24px] px-3 py-4 text-left transition duration-300",
+                            active ? "text-primary-foreground" : "text-muted-foreground hover:bg-white/60 hover:text-foreground",
+                          )}
+                        >
+                          <span className="block text-sm font-semibold">{item.label}</span>
+                          <span className={cn("mt-1 block text-2xl font-semibold", active ? "text-primary-foreground" : "text-foreground")}>
+                            {item.count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div key={activeProfileSection} className="animate-in fade-in-0 slide-in-from-bottom-4 duration-500">
+                  {activeSection.count > 0 ? activeSection.content : <EmptyState label={activeSection.emptyLabel} />}
+                </div>
+              </div>
+            ),
+          },
+        ]}
+      />
+
+      <Dialog open={listType !== null} onOpenChange={(open) => !open && setListType(null)}>
+        <DialogContent className="max-w-xl rounded-[28px]">
+          <DialogHeader>
+            <DialogTitle>{listType === "followers" ? "粉丝" : "关注"}</DialogTitle>
+            <DialogDescription>
+              {listType === "followers" ? "关注你的用户列表。" : "你关注的博主和商户。"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid max-h-[520px] gap-3 overflow-y-auto">
+            {listType === "followers" ? (
+              realFollowers.length ? (
+                realFollowers.map((follower) => <FollowerMiniCard key={follower.id} follower={follower} />)
+              ) : (
+                <EmptyState label="暂时还没有粉丝。" />
+              )
+            ) : followingCount ? (
+              <>
+                {followedBloggers.map((blogger) => (
+                  <BloggerMiniCard key={blogger.id} blogger={blogger} />
+                ))}
+                {followedSellers.map((seller) => (
+                  <SellerMiniCard key={seller.id} seller={seller} />
+                ))}
+              </>
+            ) : (
+              <EmptyState label="还没有关注任何博主或商户。" />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+export function SettingsPage() {
+  const { state, setSectionVisibility } = useDemo();
+  const sections = Object.keys(sectionTitles) as ProfileSectionKey[];
+
+  return (
+    <LayoutFrame
+      title="设置"
+      actions={
+        <Link href="/me" className={cn(buttonVariants({ variant: "outline" }))}>
+          <Home data-icon="inline-start" />
+          返回我的主页
+        </Link>
+      }
+    >
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <Card className="soft-panel border-0 bg-white/96 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-3xl">主页可见度</CardTitle>
+            <CardDescription>设置我的主页里每个 section 对外展示的权限。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {sections.map((section) => (
+              <div
+                key={section}
+                className="grid gap-3 rounded-[24px] border border-border/70 p-4 md:grid-cols-[180px_minmax(0,1fr)] md:items-center"
+              >
+                <div>
+                  <p className="font-semibold">{sectionTitles[section]}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    当前：{visibilityLabels[state.viewer.sectionVisibility[section]]}
+                  </p>
+                </div>
+                <ToggleGroup
+                  value={[state.viewer.sectionVisibility[section]]}
+                  onValueChange={(value) => {
+                    const next = value[0] as ProfileVisibility | undefined;
+                    if (next) {
+                      setSectionVisibility(section, next);
+                    }
+                  }}
+                  className="flex-wrap justify-start"
+                >
+                  {(Object.keys(visibilityLabels) as ProfileVisibility[]).map((visibility) => (
+                    <ToggleGroupItem key={visibility} value={visibility}>
+                      {visibilityLabels[visibility]}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="soft-panel h-fit border-0 bg-white/96 shadow-none lg:sticky lg:top-24">
+          <CardHeader>
+            <CardTitle>可见度说明</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm leading-7 text-muted-foreground">
+            <p>公开可见：任何访客都能看到。</p>
+            <p>关注的人可见：你关注的人能看到。</p>
+            <p>粉丝可见：关注你的人能看到。</p>
+            <p>互关可见：双方互相关注时可见。</p>
+          </CardContent>
+        </Card>
+      </section>
+    </LayoutFrame>
+  );
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div className="rounded-[24px] border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+      {label}
+    </div>
+  );
+}
+
+function LoadingScreen({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="flex items-center gap-3 rounded-full border border-border/70 bg-white/90 px-6 py-3">
+        <LoaderCircle className="animate-spin" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function MissingScreen({ title, description }: { title: string; description: string }) {
+  return (
+    <LayoutFrame title={title} description={description}>
+      <Card className="soft-panel border-0 bg-white/96 shadow-none">
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <CardFooter className="bg-transparent">
+          <Link href="/" className={cn(buttonVariants({ variant: "default" }))}>
+            回到社区首页
+          </Link>
+        </CardFooter>
+      </Card>
+    </LayoutFrame>
+  );
+}

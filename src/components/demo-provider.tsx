@@ -1,0 +1,566 @@
+"use client";
+
+import {
+  useCallback,
+  createContext,
+  startTransition,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { toast } from "sonner";
+
+import { seedBloggers, seedDemoState } from "@/lib/seed";
+import type {
+  Blogger,
+  CollabRequest,
+  DemoState,
+  Order,
+  Post,
+  Product,
+  ProfileSectionKey,
+  ProfileVisibility,
+  RequestPost,
+} from "@/lib/types";
+
+const STORAGE_KEY = "jasmine-demo-state-v1";
+
+type PurchasePayload = {
+  productId: string;
+  size: string;
+};
+
+type DemoContextValue = {
+  state: DemoState;
+  hydrated: boolean;
+  toggleLike: (postId: string) => void;
+  toggleSavePost: (postId: string) => void;
+  toggleFollow: (sellerId: string) => void;
+  toggleBloggerFollow: (bloggerId: string) => void;
+  toggleCartProduct: (productId: string) => void;
+  setSectionVisibility: (section: ProfileSectionKey, visibility: ProfileVisibility) => void;
+  trackView: (entry: string) => void;
+  publishUserPost: (payload: {
+    title: string;
+    body: string;
+    coverImage: string;
+    images?: string[];
+    tags: string[];
+    productIds?: string[];
+  }) => Post;
+  publishSellerPost: (product: Product, draft: { title: string; caption: string; modelImage: string; tags: string[] }) => void;
+  publishBloggerCollabPost: (product: Product, blogger: Blogger) => void;
+  submitCollabRequest: (request: Omit<CollabRequest, "id" | "status" | "createdAt">) => void;
+  approveCollabRequest: (requestId: string) => void;
+  addProduct: (product: Product) => void;
+  addRequest: (request: RequestPost, post: Post) => void;
+  purchaseProduct: (payload: PurchasePayload) => { order: Order; balanceBefore: number; balanceAfter: number; stockBefore: number; stockAfter: number; sellerRevenueBefore: number; sellerRevenueAfter: number } | null;
+  resetDemo: () => void;
+};
+
+const DemoContext = createContext<DemoContextValue | null>(null);
+
+function cloneSeedState(): DemoState {
+  return JSON.parse(JSON.stringify(seedDemoState)) as DemoState;
+}
+
+function normalizeState(value: DemoState): DemoState {
+  const seed = cloneSeedState();
+  const seedPostsById = new Map(seed.posts.map((post) => [post.id, post]));
+
+  return {
+    ...seed,
+    ...value,
+    bloggers: value.bloggers?.length ? value.bloggers : seed.bloggers,
+    collabRequests: value.collabRequests ?? [],
+    posts: (value.posts?.length ? value.posts : seed.posts).map((post) => ({
+      ...seedPostsById.get(post.id),
+      ...post,
+    })),
+    viewer: {
+      ...seed.viewer,
+      ...value.viewer,
+      followedSellerIds: value.viewer?.followedSellerIds ?? [],
+      followedBloggerIds: value.viewer?.followedBloggerIds ?? [],
+      likedPostIds: value.viewer?.likedPostIds ?? [],
+      savedPostIds: value.viewer?.savedPostIds ?? [],
+      favoriteProductIds: value.viewer?.favoriteProductIds ?? [],
+      cartProductIds: value.viewer?.cartProductIds ?? value.viewer?.favoriteProductIds ?? [],
+      sectionVisibility: {
+        ...seed.viewer.sectionVisibility,
+        ...(value.viewer?.sectionVisibility ?? {}),
+      },
+      orders: value.viewer?.orders ?? [],
+      viewHistory: value.viewer?.viewHistory ?? [],
+    },
+  };
+}
+
+export function DemoProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<DemoState>(() => cloneSeedState());
+  const [storageReady, setStorageReady] = useState(false);
+  const hydrated = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          setState(normalizeState(JSON.parse(raw) as DemoState));
+        }
+      } catch {
+        setState(cloneSeedState());
+      } finally {
+        setStorageReady(true);
+      }
+    });
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !storageReady) {
+      return;
+    }
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [hydrated, state, storageReady]);
+
+  const trackView = useCallback((entry: string) => {
+    setState((current) => {
+      if (current.viewer.viewHistory[0] === entry) {
+        return current;
+      }
+
+      const nextHistory = [entry, ...current.viewer.viewHistory.filter((item) => item !== entry)].slice(0, 10);
+
+      return {
+        ...current,
+        viewer: {
+          ...current.viewer,
+          viewHistory: nextHistory,
+        },
+      };
+    });
+  }, []);
+
+  const value = useMemo<DemoContextValue>(() => {
+    return {
+      state,
+      hydrated: hydrated && storageReady,
+      toggleLike(postId) {
+        startTransition(() => {
+          setState((current) => {
+            const liked = current.viewer.likedPostIds.includes(postId);
+
+            return {
+              ...current,
+              posts: current.posts.map((post) =>
+                post.id === postId
+                  ? {
+                      ...post,
+                      likes: liked ? Math.max(post.likes - 1, 0) : post.likes + 1,
+                    }
+                  : post,
+              ),
+              viewer: {
+                ...current.viewer,
+                likedPostIds: liked
+                  ? current.viewer.likedPostIds.filter((id) => id !== postId)
+                  : [...current.viewer.likedPostIds, postId],
+              },
+            };
+          });
+        });
+      },
+      toggleSavePost(postId) {
+        startTransition(() => {
+          setState((current) => {
+            const saved = current.viewer.savedPostIds.includes(postId);
+
+            return {
+              ...current,
+              viewer: {
+                ...current.viewer,
+                savedPostIds: saved
+                  ? current.viewer.savedPostIds.filter((id) => id !== postId)
+                  : [...current.viewer.savedPostIds, postId],
+              },
+            };
+          });
+        });
+      },
+      toggleFollow(sellerId) {
+        startTransition(() => {
+          setState((current) => {
+            const following = current.viewer.followedSellerIds.includes(sellerId);
+
+            return {
+              ...current,
+              sellers: current.sellers.map((seller) =>
+                seller.id === sellerId
+                  ? {
+                      ...seller,
+                      followerCount: following
+                        ? Math.max(seller.followerCount - 1, 0)
+                        : seller.followerCount + 1,
+                    }
+                  : seller,
+              ),
+              viewer: {
+                ...current.viewer,
+                followedSellerIds: following
+                  ? current.viewer.followedSellerIds.filter((id) => id !== sellerId)
+                  : [...current.viewer.followedSellerIds, sellerId],
+              },
+            };
+          });
+        });
+      },
+      toggleBloggerFollow(bloggerId) {
+        startTransition(() => {
+          setState((current) => {
+            const following = current.viewer.followedBloggerIds.includes(bloggerId);
+
+            return {
+              ...current,
+              bloggers: current.bloggers.map((blogger) =>
+                blogger.id === bloggerId
+                  ? {
+                      ...blogger,
+                      followerCount: following
+                        ? Math.max(blogger.followerCount - 1, 0)
+                        : blogger.followerCount + 1,
+                    }
+                  : blogger,
+              ),
+              viewer: {
+                ...current.viewer,
+                followedBloggerIds: following
+                  ? current.viewer.followedBloggerIds.filter((id) => id !== bloggerId)
+                  : [...current.viewer.followedBloggerIds, bloggerId],
+              },
+            };
+          });
+        });
+      },
+      toggleCartProduct(productId) {
+        startTransition(() => {
+          setState((current) => {
+            const inCart = current.viewer.cartProductIds.includes(productId);
+
+            return {
+              ...current,
+              viewer: {
+                ...current.viewer,
+                favoriteProductIds: inCart
+                  ? current.viewer.favoriteProductIds.filter((id) => id !== productId)
+                  : [...current.viewer.favoriteProductIds.filter((id) => id !== productId), productId],
+                cartProductIds: inCart
+                  ? current.viewer.cartProductIds.filter((id) => id !== productId)
+                  : [...current.viewer.cartProductIds, productId],
+              },
+            };
+          });
+        });
+      },
+      setSectionVisibility(section, visibility) {
+        setState((current) => ({
+          ...current,
+          viewer: {
+            ...current.viewer,
+            sectionVisibility: {
+              ...current.viewer.sectionVisibility,
+              [section]: visibility,
+            },
+          },
+        }));
+      },
+      trackView,
+      publishUserPost(payload) {
+        const post: Post = {
+          id: `post-user-${Date.now()}`,
+          type: "seller-look",
+          bloggerId: "blogger-me",
+          productId: payload.productIds?.[0],
+          productIds: payload.productIds,
+          productTags: payload.productIds?.map((productId, index) => ({
+            productId,
+            label: index === 0 ? "同款商品" : "搭配商品",
+            x: index === 0 ? 54 : 42,
+            y: index === 0 ? 40 : 62,
+          })),
+          title: payload.title,
+          body: payload.body,
+          coverImage: payload.coverImage,
+          images: payload.images?.length ? payload.images : [payload.coverImage],
+          styleTags: payload.tags,
+          likes: 0,
+          createdAt: new Date().toISOString(),
+        };
+
+        setState((current) => ({
+          ...current,
+          posts: [post, ...current.posts],
+          products: current.products.map((product) =>
+            payload.productIds?.includes(product.id)
+              ? {
+                  ...product,
+                  sourcePostId: product.sourcePostId ?? post.id,
+                  sourcePostIds: [post.id, ...(product.sourcePostIds ?? [])],
+                }
+              : product,
+          ),
+        }));
+        toast.success("图文已发布。");
+        return post;
+      },
+      addProduct(product) {
+        setState((current) => ({
+          ...current,
+          products: [product, ...current.products],
+        }));
+      },
+      publishSellerPost(product, draft) {
+        setState((current) => {
+          const postId = `post-${product.id}`;
+          const nextPost: Post = {
+            id: postId,
+            type: "seller-look",
+            sellerId: product.sellerId,
+            bloggerId: seedBloggers[0]?.id,
+            productId: product.id,
+            productIds: [product.id],
+            productTags: [{ productId: product.id, label: product.name, x: 54, y: 42 }],
+            title: draft.title,
+            body: draft.caption,
+            coverImage: draft.modelImage,
+            images: [draft.modelImage],
+            styleTags: draft.tags,
+            likes: 0,
+            createdAt: new Date().toISOString(),
+            priceLabel: `¥${product.price} 起`,
+          };
+
+          return {
+            ...current,
+            posts: [nextPost, ...current.posts.filter((post) => post.id !== postId)],
+            products: current.products.map((item) =>
+              item.id === product.id
+                ? {
+                    ...item,
+                    sourcePostId: postId,
+                    sourcePostIds: [postId, ...(item.sourcePostIds ?? []).filter((id) => id !== postId)],
+                  }
+                : item,
+            ),
+          };
+        });
+      },
+      publishBloggerCollabPost(product, blogger) {
+        setState((current) => {
+          const postId = `post-collab-${blogger.id}-${product.id}-${Date.now()}`;
+          const primaryTag = product.tags[0] ?? blogger.styleTags[0] ?? "穿搭";
+          const nextPost: Post = {
+            id: postId,
+            type: "seller-look",
+            sellerId: product.sellerId,
+            bloggerId: blogger.id,
+            productId: product.id,
+            productIds: [product.id],
+            productTags: [{ productId: product.id, label: product.name, x: 54, y: 40 }],
+            title: `${blogger.name} 的 ${primaryTag} 商单穿搭`,
+            body: `${blogger.name} 接受商单后，基于 ${product.name} 生成了一套 ${primaryTag} 穿搭。重点是 ${product.tags
+              .slice(1)
+              .join(" / ")}，用户可以从图片标签直接进入商品。`,
+            coverImage: product.tryOnPreset,
+            images: [product.tryOnPreset],
+            styleTags: [...new Set([primaryTag, ...blogger.styleTags, ...product.tags])].slice(0, 5),
+            likes: 0,
+            createdAt: new Date().toISOString(),
+            priceLabel: `¥${product.price} 起`,
+          };
+
+          return {
+            ...current,
+            posts: [nextPost, ...current.posts],
+            products: current.products.map((item) =>
+              item.id === product.id
+                ? {
+                    ...item,
+                    sourcePostId: item.sourcePostId ?? postId,
+                    sourcePostIds: [postId, ...(item.sourcePostIds ?? [])],
+                  }
+                : item,
+            ),
+          };
+        });
+        toast.success(`${blogger.name} 已接受商单，穿搭帖已生成。`);
+      },
+      submitCollabRequest(request) {
+        setState((current) => ({
+          ...current,
+          collabRequests: [
+            {
+              ...request,
+              id: `collab-${Date.now()}`,
+              status: "pending",
+              createdAt: new Date().toISOString(),
+            },
+            ...current.collabRequests,
+          ],
+        }));
+        toast.success("商单样图和帖子信息已发送给商户。");
+      },
+      approveCollabRequest(requestId) {
+        setState((current) => {
+          const request = current.collabRequests.find((item) => item.id === requestId);
+          const product = request ? current.products.find((item) => item.id === request.productId) : null;
+
+          if (!request || !product) {
+            toast.error("商单请求不存在。");
+            return current;
+          }
+
+          const postId = `post-collab-${request.bloggerId}-${request.productId}-${Date.now()}`;
+          const nextPost: Post = {
+            id: postId,
+            type: "seller-look",
+            sellerId: request.sellerId,
+            bloggerId: request.bloggerId,
+            productId: request.productId,
+            productIds: [request.productId],
+            productTags: [{ productId: request.productId, label: product.name, x: 54, y: 40 }],
+            title: request.title,
+            body: request.body,
+            coverImage: request.coverImage,
+            images: [request.coverImage],
+            styleTags: request.tags,
+            likes: 0,
+            createdAt: new Date().toISOString(),
+            priceLabel: `¥${product.price} 起`,
+          };
+
+          return {
+            ...current,
+            collabRequests: current.collabRequests.map((item) =>
+              item.id === requestId ? { ...item, status: "approved" } : item,
+            ),
+            posts: [nextPost, ...current.posts],
+            products: current.products.map((item) =>
+              item.id === request.productId
+                ? {
+                    ...item,
+                    sourcePostId: item.sourcePostId ?? postId,
+                    sourcePostIds: [postId, ...(item.sourcePostIds ?? [])],
+                  }
+                : item,
+            ),
+          };
+        });
+        toast.success("商户已确认合作，带货帖已发布。");
+      },
+      addRequest(request, post) {
+        setState((current) => ({
+          ...current,
+          requests: [request, ...current.requests],
+          posts: [post, ...current.posts],
+        }));
+      },
+      purchaseProduct({ productId, size }) {
+        let result: DemoContextValue["purchaseProduct"] extends (...args: never[]) => infer T ? T : never = null;
+
+        setState((current) => {
+          const product = current.products.find((item) => item.id === productId);
+          if (!product) {
+            toast.error("商品不存在。");
+            return current;
+          }
+
+          const seller = current.sellers.find((item) => item.id === product.sellerId);
+          if (!seller) {
+            toast.error("商户不存在。");
+            return current;
+          }
+
+          if (!size) {
+            toast.error("请先选择尺码。");
+            return current;
+          }
+
+          if (product.stock < 1) {
+            toast.error("库存不足，暂时无法购买。");
+            return current;
+          }
+
+          if (current.viewer.balance < product.price) {
+            toast.error("余额不足，请换一件看看。");
+            return current;
+          }
+
+          const nextOrder: Order = {
+            id: `ORD-${current.viewer.orders.length + 1}`.padEnd(8, "0"),
+            productId,
+            productName: product.name,
+            sellerId: seller.id,
+            amount: product.price,
+            size,
+            status: "已成交",
+            createdAt: new Date().toISOString(),
+          };
+
+          result = {
+            order: nextOrder,
+            balanceBefore: current.viewer.balance,
+            balanceAfter: current.viewer.balance - product.price,
+            stockBefore: product.stock,
+            stockAfter: product.stock - 1,
+            sellerRevenueBefore: seller.revenue,
+            sellerRevenueAfter: seller.revenue + product.price,
+          };
+
+          return {
+            ...current,
+            products: current.products.map((item) =>
+              item.id === productId ? { ...item, stock: item.stock - 1 } : item,
+            ),
+            sellers: current.sellers.map((item) =>
+              item.id === seller.id ? { ...item, revenue: item.revenue + product.price } : item,
+            ),
+            viewer: {
+              ...current.viewer,
+              balance: current.viewer.balance - product.price,
+              orders: [nextOrder, ...current.viewer.orders],
+            },
+          };
+        });
+
+        return result;
+      },
+      resetDemo() {
+        setState(cloneSeedState());
+        toast.success("状态已重置。");
+      },
+    };
+  }, [hydrated, state, storageReady, trackView]);
+
+  return <DemoContext.Provider value={value}>{children}</DemoContext.Provider>;
+}
+
+export function useDemo() {
+  const context = useContext(DemoContext);
+
+  if (!context) {
+    throw new Error("useDemo must be used within DemoProvider");
+  }
+
+  return context;
+}
