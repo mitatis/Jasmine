@@ -192,6 +192,10 @@ function normalizeState(value: DemoState): DemoState {
   };
 }
 
+function resolveProduct(products: Product[], productId?: string) {
+  return products.find((product) => product.id === productId);
+}
+
 export function DemoProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<DemoState>(() => cloneSeedState());
   const [storageReady, setStorageReady] = useState(false);
