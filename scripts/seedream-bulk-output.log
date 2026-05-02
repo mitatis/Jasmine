@@ -1,0 +1,8 @@
+
+=== Generating posts (HALF: 75 images) ===
+
+[Blogger blogger-001] 林叙白 (1/30)
+  Generating post-bulk-001...
+  [post-bulk-001] attempt 1 failed: fetch failed
+ReferenceError: postImageMap is not defined
+    at main (file:///Users/zik/ZIK/10%20Projects/Jasmine/scripts/generate-seedream-bulk.mjs:604:9)
