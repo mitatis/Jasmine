@@ -3,11 +3,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
-  ChevronLeft,
   ChevronRight,
   Heart,
   LoaderCircle,
@@ -183,6 +182,66 @@ function getRecommendedBloggers(product: Product | null, bloggers: Blogger[]) {
     .slice(0, 3);
 }
 
+const hotStyles = ["通勤极简", "高街暗黑", "美式复古", "Clean Fit", "韩系宽松", "针织", "牛仔", "风衣"];
+
+const communityTrends = [
+  {
+    id: "summer-office",
+    title: "初夏通勤穿搭灵感",
+    count: 8232,
+    tone: "🔥",
+    tags: ["通勤极简", "Clean Fit", "沙色西装"],
+    summary: [
+      "初夏通勤的重点不是正式，而是轻、干净、能直接从办公室切到咖啡店。低饱和西装、浅色内搭和利落裤装是这个趋势的核心。",
+      "社区里这类内容的成交路径很短：用户先收藏穿搭公式，再从图片 tag 或同款小条进入商品试穿。",
+    ],
+  },
+  {
+    id: "denim-guide",
+    title: "牛仔单品百搭指南",
+    count: 6114,
+    tone: "🌿",
+    tags: ["美式复古", "水洗牛仔", "咖啡店穿搭"],
+    summary: [
+      "浅水洗牛仔正在从复古单品变成日常基础款，白T、深色直筒裤和棕色配件是最稳定的组合。",
+      "这一趋势下的商品更适合用博主 OOTD 做信任入口，买家需要看到真实穿搭氛围，而不是只看平铺图。",
+    ],
+  },
+  {
+    id: "light-layer",
+    title: "薄外套叠穿公式",
+    count: 5077,
+    tone: "💧",
+    tags: ["风衣", "橄榄风衣", "韩系宽松", "象牙针织"],
+    summary: [
+      "薄外套叠穿解决的是早晚温差和层次感问题，橄榄风衣、象牙针织和低对比色搭配最容易被复刻。",
+      "适合把商品放进相似风格推荐里承接需求，用户不一定买同款，但会沿着相同风格继续找。",
+    ],
+  },
+];
+
+function postMatchesTags(post: Post, tags: string[]) {
+  if (tags.length === 0) {
+    return true;
+  }
+
+  return tags.some((tag) => post.styleTags.includes(tag) || post.title.includes(tag) || post.body.includes(tag));
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function textMatchesQuery(values: Array<string | undefined>, query: string) {
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return values.some((value) => normalizeSearchText(value ?? "").includes(normalizedQuery));
+}
+
 function getCurrentUserFollowers(bloggers: Blogger[]) {
   const bloggerFollowers: FollowerProfile[] = bloggers
     .filter((blogger) => blogger.id !== "blogger-me")
@@ -312,98 +371,130 @@ function LocalImageUploader({
 
 function AppHeader({ mode }: { mode: AppMode }) {
   const { resetDemo } = useDemo();
+  const pathname = usePathname();
+  const router = useRouter();
   const isSeller = mode === "seller";
   const [publishOpen, setPublishOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const userNav = [
+    { href: "/", label: "社区" },
+    { href: "/products", label: "商城" },
+    { href: "/me", label: "我的" },
+  ];
+  const sellerNav = [
+    { href: "/sell", label: "商家发布" },
+    { href: "/seller/posts", label: "社区" },
+    { href: "/seller/products", label: "商品" },
+  ];
+
+  function submitSearch(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    router.push(query ? `/search?q=${encodeURIComponent(query)}` : "/search");
+  }
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border/70 bg-background/88 backdrop-blur-xl">
-      <div className="page-shell flex items-center justify-between gap-4 py-4">
+    <header className="sticky top-0 z-30 border-b border-border/70 bg-white/92 backdrop-blur-xl">
+      <div className="page-shell grid items-center gap-4 py-4 lg:grid-cols-[220px_minmax(180px,1fr)_minmax(520px,max-content)] xl:grid-cols-[250px_minmax(260px,1fr)_minmax(620px,max-content)]">
         <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-            <Shirt />
-          </div>
           <div>
-            <p className="text-xs font-semibold text-muted-foreground">{isSeller ? "商户端" : "用户端"}</p>
-            <Link href="/" className="font-heading text-3xl leading-none">
+            <Link href="/" className="font-heading text-4xl leading-none tracking-[-0.05em]">
               穿搭市集
             </Link>
+            <p className="mt-1 text-xs tracking-[0.18em] text-muted-foreground">
+              {isSeller ? "商户端 · 发布与成交工作台" : "一起发现好看和好穿的日常"}
+            </p>
           </div>
         </div>
 
-        <nav className="hidden items-center gap-1 rounded-full border border-border/80 bg-white/70 px-2 py-1.5 text-sm md:flex">
-          {(isSeller
-            ? [
-                { href: "/sell", label: "发布" },
-                { href: "/seller/posts", label: "帖子" },
-                { href: "/seller/products", label: "商品" },
-              ]
-            : [
-                { href: "/", label: "帖子" },
-                { href: "/products", label: "商城" },
-                { href: "/me", label: "我的" },
-              ]
-          ).map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="rounded-full px-4 py-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              {item.label}
-            </Link>
-          ))}
+        <nav className="hidden items-center justify-center gap-8 text-sm md:flex">
+          {(isSeller ? sellerNav : userNav).map((item) => {
+            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "relative px-1 py-2 text-muted-foreground transition hover:text-foreground",
+                  active &&
+                    "font-semibold text-foreground after:absolute after:bottom-0 after:left-0 after:h-0.5 after:w-full after:bg-primary",
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
-        {!isSeller ? (
-          <div className="hidden items-center gap-2 md:flex">
-            <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
-              <Button className="bg-primary px-6" onClick={() => setPublishOpen(true)}>
-                <Sparkles data-icon="inline-start" />
-                发布
-              </Button>
-              <DialogContent className="max-w-md rounded-[28px] p-0">
-                <DialogHeader className="px-6 pt-6">
-                  <DialogTitle className="text-3xl">发布内容</DialogTitle>
-                  <DialogDescription>选择发布类型，图文发布支持多图上传，AI 生成统一进入试衣间。</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-3 px-6 pb-6">
-                  <Link
-                    href="/create"
-                    onClick={() => setPublishOpen(false)}
-                    className="rounded-[24px] border border-border/70 p-4 transition hover:bg-secondary/50"
-                  >
-                    <p className="text-xl font-semibold">发图文</p>
-                    <p className="mt-1 text-sm text-muted-foreground">多图发布 / 商单广场 / 发给商户确认。</p>
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => toast.info("视频发布入口已预留。")}
-                    className="rounded-[24px] border border-border/70 p-4 text-left transition hover:bg-secondary/50"
-                  >
-                    <p className="text-xl font-semibold">发视频</p>
-                    <p className="mt-1 text-sm text-muted-foreground">短视频穿搭内容入口。</p>
-                  </button>
-                </div>
-              </DialogContent>
-            </Dialog>
-            <Link href="/try-on" className={cn(buttonVariants({ variant: "outline" }), "px-5")}>
-              <Sparkles data-icon="inline-start" />
-              AI 试衣间
-            </Link>
-          </div>
-        ) : null}
+        <div className="flex min-w-0 items-center justify-end gap-2 xl:gap-3">
+          {!isSeller ? (
+            <form
+              onSubmit={submitSearch}
+              className="hidden h-11 w-[260px] shrink-0 items-center gap-2 rounded-full border border-border/80 bg-white px-4 text-sm text-muted-foreground shadow-sm transition focus-within:border-primary/40 focus-within:text-foreground xl:flex"
+            >
+              <Search className="size-4" />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="搜索穿搭、单品、博主、商户"
+                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </form>
+          ) : null}
 
-        <div className="flex items-center gap-2">
-          <Link
-            href={isSeller ? "/" : "/sell"}
-            className={cn(buttonVariants({ variant: isSeller ? "outline" : "default" }))}
+          {!isSeller ? (
+            <>
+              <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+                <Button className="hidden bg-primary px-5 md:inline-flex" onClick={() => setPublishOpen(true)}>
+                  <Sparkles data-icon="inline-start" />
+                  发布
+                </Button>
+                <DialogContent className="max-w-md rounded-[28px] p-0">
+                  <DialogHeader className="px-6 pt-6">
+                    <DialogTitle className="text-3xl">发布内容</DialogTitle>
+                    <DialogDescription>选择发布类型，图文发布支持多图上传，AI 生成统一进入试衣间。</DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-3 px-6 pb-6">
+                    <Link
+                      href="/create"
+                      onClick={() => setPublishOpen(false)}
+                      className="rounded-[24px] border border-border/70 p-4 transition hover:bg-secondary/50"
+                    >
+                      <p className="text-xl font-semibold">发图文</p>
+                      <p className="mt-1 text-sm text-muted-foreground">多图发布 / 商单广场 / 发给商户确认。</p>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => toast.info("视频发布入口已预留。")}
+                      className="rounded-[24px] border border-border/70 p-4 text-left transition hover:bg-secondary/50"
+                    >
+                      <p className="text-xl font-semibold">发视频</p>
+                      <p className="mt-1 text-sm text-muted-foreground">短视频穿搭内容入口。</p>
+                    </button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              <Link href="/try-on" className={cn(buttonVariants({ variant: "outline" }), "hidden px-5 md:inline-flex")}>
+                <Sparkles data-icon="inline-start" />
+                AI 试衣间
+              </Link>
+            </>
+          ) : null}
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={resetDemo}
+            className="hidden h-11 shrink-0 rounded-full bg-white px-4 text-sm lg:inline-flex"
           >
-            {isSeller ? <Home data-icon="inline-start" /> : <Store data-icon="inline-start" />}
-            {isSeller ? "切回用户" : "我是商户"}
-          </Link>
-          <Button variant="outline" onClick={resetDemo}>
             <RefreshCcw data-icon="inline-start" />
             重置
           </Button>
+          <Link href={isSeller ? "/" : "/sell"} className={cn(buttonVariants({ variant: "outline" }), "hidden h-11 shrink-0 rounded-full px-4 lg:inline-flex")}>
+            {isSeller ? <Home data-icon="inline-start" /> : <Store data-icon="inline-start" />}
+            {isSeller ? "切回用户" : "商户端"}
+          </Link>
           <StatusSheet mode={mode} />
         </div>
       </div>
@@ -604,77 +695,124 @@ function FeedPostCard({ post, index }: { post: Post; index: number }) {
   const isLiked = state.viewer.likedPostIds.includes(post.id);
   const isFollowed = blogger ? state.viewer.followedBloggerIds.includes(blogger.id) : false;
   const href = post.type === "seller-look" ? `/posts/${post.id}` : `/requests/${post.requestId}`;
-  const imageHeights = [
-    "h-[310px]",
-    "h-[390px]",
-    "h-[270px]",
-    "h-[350px]",
-    "h-[430px]",
-    "h-[300px]",
-  ];
+  const imageHeights = ["h-[310px]", "h-[390px]", "h-[280px]", "h-[350px]", "h-[430px]", "h-[300px]"];
+  const attachedProduct = getPostProductIds(post)
+    .map((id) => resolveProduct(state.products, id))
+    .find((product): product is Product => Boolean(product));
+  const request = post.requestId ? state.requests.find((item) => item.id === post.requestId) : null;
 
-  return (
-    <article className="mb-5 break-inside-avoid overflow-hidden rounded-lg border border-border/70 bg-white shadow-[0_14px_36px_-28px_rgba(49,40,27,0.42)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_44px_-30px_rgba(49,40,27,0.48)]">
-      <Link href={href} className="block">
-        <div className="relative">
-          <img
-            src={post.coverImage}
-            alt={post.title}
-            className={cn("w-full object-cover", imageHeights[index % imageHeights.length])}
-          />
-          <div className="absolute left-3 top-3 flex gap-2">
-            <Badge variant={post.type === "seller-look" ? "default" : "secondary"}>
-              {post.type === "seller-look" ? "OOTD" : "征集"}
-            </Badge>
-            {post.type === "buyer-request" && post.priceLabel ? (
-              <Badge variant="secondary">{post.priceLabel}</Badge>
-            ) : null}
+  if (post.type === "buyer-request") {
+    const offerProducts = request?.matchedOffers
+      .map((offer) => resolveProduct(state.products, offer.productId))
+      .filter((product): product is Product => Boolean(product))
+      .slice(0, 4) ?? [];
+
+    return (
+      <article className="relative mb-5 flex aspect-square break-inside-avoid flex-col overflow-hidden rounded-[26px] border border-dashed border-[#d9a47d] bg-[#fff8ef] p-4 shadow-[0_18px_46px_-34px_rgba(132,82,42,0.65)] transition hover:-translate-y-0.5">
+        <div className="absolute -left-4 top-1/2 size-8 -translate-y-1/2 rounded-full bg-background" />
+        <div className="absolute -right-4 top-1/2 size-8 -translate-y-1/2 rounded-full bg-background" />
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              <Badge className="bg-[#ef7d3a] text-white hover:bg-[#ef7d3a]">求助贴</Badge>
+              <span className="text-xs text-muted-foreground">{post.priceLabel ?? "预算待定"}</span>
+            </div>
+            <Link href={href}>
+              <h3 className="line-clamp-2 text-xl leading-tight">{post.title}</h3>
+            </Link>
+            <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{post.body}</p>
           </div>
+          <Avatar className="size-10 shrink-0 border border-[#e8c7a8] bg-white">
+            <AvatarFallback>求</AvatarFallback>
+          </Avatar>
         </div>
-      </Link>
-
-      <div className="flex flex-col gap-3 p-3">
-        <Link href={href} className="block">
-          <h3 className="line-clamp-2 text-[15px] font-semibold leading-6">{post.title}</h3>
-        </Link>
-
-        <div className="flex flex-wrap gap-1.5">
-          {post.styleTags.slice(0, 3).map((tag) => (
-            <span key={tag} className="text-xs text-muted-foreground">
-              #{tag}
-            </span>
+        <div className="relative mt-4 grid flex-1 grid-cols-2 gap-2 overflow-hidden">
+          {(offerProducts.length ? offerProducts : [{ id: post.id, image: post.coverImage, name: post.title } as Product]).map((product, productIndex) => (
+            <Link
+              key={`${product.id}-${productIndex}`}
+              href={product.id === post.id ? href : `/products/${product.id}`}
+              className="relative min-h-0 overflow-hidden rounded-[16px] border border-white bg-white"
+            >
+              <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+              {productIndex === 0 ? (
+                <span className="absolute bottom-1 left-1 rounded-full bg-white/90 px-2 py-0.5 text-[11px]">求购需求</span>
+              ) : null}
+            </Link>
           ))}
         </div>
-
-        <div className="flex items-center justify-between gap-3">
-          <Link href={href} className="flex min-w-0 items-center gap-2">
-            <Avatar className="size-7 border border-border/70 bg-secondary">
-              <AvatarFallback>{blogger?.avatar ?? seller?.avatar ?? "征"}</AvatarFallback>
-            </Avatar>
-            <span className="truncate text-xs text-muted-foreground">
-              {blogger?.name ?? "用户征集"}
-            </span>
-          </Link>
-
-          <div className="flex items-center gap-1.5">
-            {blogger ? (
-              <button
-                type="button"
-                onClick={() => toggleBloggerFollow(blogger.id)}
-                className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
-              >
-                {isFollowed ? "已关注" : "关注"}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => toggleLike(post.id)}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-secondary hover:text-foreground"
-              aria-label={isLiked ? "取消点赞" : "点赞帖子"}
-            >
-              <Heart className={cn("size-3.5", isLiked && "fill-current text-foreground")} />
+        <div className="relative mt-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <button type="button" onClick={() => toggleLike(post.id)} className="inline-flex items-center gap-1 hover:text-foreground">
+              <Heart className={cn("size-4", isLiked && "fill-current text-[#ef7d3a]")} />
               {post.likes}
             </button>
+            <span className="text-xs">响应 {request?.matchedOffers.length ?? 0}</span>
+          </div>
+          <Link href={href} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-[#9e6f48] text-[#744f31] hover:bg-[#fff1df]")}>
+            帮我找
+          </Link>
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <article className="mb-5 break-inside-avoid overflow-hidden rounded-[22px] border border-border/70 bg-white shadow-[0_14px_36px_-28px_rgba(49,40,27,0.42)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_44px_-30px_rgba(49,40,27,0.48)]">
+      <Link href={href} className="relative block bg-secondary">
+        <img
+          src={post.coverImage}
+          alt={post.title}
+          className={cn("w-full object-cover", imageHeights[index % imageHeights.length])}
+        />
+        <div className="absolute left-3 top-3 flex gap-2">
+          <Badge className="bg-primary text-primary-foreground hover:bg-primary">AI 穿搭</Badge>
+          {attachedProduct ? (
+            <Badge className="bg-white/90 text-foreground hover:bg-white/90">{formatCurrency(attachedProduct.price)}</Badge>
+          ) : null}
+        </div>
+      </Link>
+      <div className="space-y-3 p-4">
+        <Link href={href}>
+          <h3 className="line-clamp-2 text-base font-semibold leading-6">{post.title}</h3>
+        </Link>
+        <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">{post.body}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {post.styleTags.slice(0, 3).map((tag) => (
+            <Badge key={tag} variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+              {tag}
+            </Badge>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Link href={blogger?.id === "blogger-me" ? "/me" : blogger ? `/bloggers/${blogger.id}` : href} className="flex min-w-0 items-center gap-2">
+            <Avatar className="size-8 border border-border/70 bg-secondary">
+              <AvatarFallback>{blogger?.avatar ?? seller?.avatar ?? "穿"}</AvatarFallback>
+            </Avatar>
+            <span className="truncate text-sm font-medium">{blogger?.name ?? seller?.name ?? "穿搭用户"}</span>
+          </Link>
+          {blogger ? (
+            <button
+              type="button"
+              onClick={() => toggleBloggerFollow(blogger.id)}
+              className={cn(
+                "shrink-0 rounded-full border px-2.5 py-1 text-xs transition",
+                isFollowed ? "border-primary bg-primary text-primary-foreground" : "border-border/70 text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {isFollowed ? "已关注" : "关注"}
+            </button>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between border-t border-border/60 pt-3 text-sm text-muted-foreground">
+          <button type="button" onClick={() => toggleLike(post.id)} className="inline-flex items-center gap-1 transition hover:text-foreground">
+            <Heart className={cn("size-4", isLiked && "fill-current text-foreground")} />
+            {post.likes}
+          </button>
+          <div className="flex items-center gap-2">
+            <span>评论 {Math.max(12, Math.round(post.likes / 8))}</span>
+            <Link href={attachedProduct ? `/products/${attachedProduct.id}` : href} className="font-medium text-foreground hover:underline">
+              看同款
+            </Link>
           </div>
         </div>
       </div>
@@ -745,57 +883,48 @@ function SimilarProductList({
   );
 }
 
-function ProductRail({ title, products }: { title: string; products: Product[] }) {
-  const railRef = useRef<HTMLDivElement>(null);
-
-  function scrollBy(direction: "left" | "right") {
-    railRef.current?.scrollBy({
-      left: direction === "left" ? -360 : 360,
-      behavior: "smooth",
-    });
-  }
-
-  if (products.length === 0) {
-    return null;
-  }
-
+function ProductSideSection({
+  title,
+  products,
+  emptyLabel,
+}: {
+  title: string;
+  products: Product[];
+  emptyLabel: string;
+}) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-2xl">{title}</h3>
-        <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={() => scrollBy("left")} aria-label="向左滑动商品">
-            <ChevronLeft />
-          </Button>
-          <Button variant="outline" size="icon" onClick={() => scrollBy("right")} aria-label="向右滑动商品">
-            <ChevronRight />
-          </Button>
-        </div>
-      </div>
-      <div ref={railRef} className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {products.map((product) => (
-          <Link
-            key={product.id}
-            href={`/products/${product.id}`}
-            className="group grid min-w-[300px] grid-cols-[96px_minmax(0,1fr)] gap-3 rounded-[24px] border border-border/70 bg-white/94 p-3 transition hover:-translate-y-0.5 hover:shadow-[0_18px_42px_-32px_rgba(49,40,27,0.45)]"
-          >
-            <img src={product.image} alt={product.name} className="h-28 w-full rounded-[18px] object-cover" />
-            <div className="min-w-0">
-              <p className="truncate font-semibold">{product.name}</p>
-              <p className="mt-1 text-lg font-semibold">{formatCurrency(product.price)}</p>
-              <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{product.similarityReason}</p>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {product.tags.slice(0, 2).map((tag) => (
-                  <span key={tag} className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">
-                    {tag}
-                  </span>
-                ))}
+    <Card className="soft-panel border-0 bg-white/96 shadow-none">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-2xl">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {products.length ? (
+          products.slice(0, 5).map((product) => (
+            <Link
+              key={product.id}
+              href={`/products/${product.id}`}
+              className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 rounded-[20px] border border-border/70 bg-white p-2 transition hover:-translate-y-0.5 hover:bg-secondary/40"
+            >
+              <img src={product.image} alt={product.name} className="h-24 w-full rounded-[16px] object-cover" />
+              <div className="min-w-0 py-1">
+                <p className="line-clamp-2 text-sm font-semibold leading-5">{product.name}</p>
+                <p className="mt-1 text-base font-semibold">{formatCurrency(product.price)}</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{product.similarityReason}</p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {product.tags.slice(0, 2).map((tag) => (
+                    <span key={tag} className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </div>
+            </Link>
+          ))
+        ) : (
+          <EmptyState label={emptyLabel} />
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -952,7 +1081,7 @@ export function SellerPostsPage() {
   return (
     <LayoutFrame
       mode="seller"
-      title="帖子"
+      title="社区"
       actions={
         <Link href="/sell" className={cn(buttonVariants({ variant: "default" }))}>
           <Sparkles data-icon="inline-start" />
@@ -1239,19 +1368,50 @@ export function BloggerDetailPage({ bloggerId }: { bloggerId: string }) {
 
 export function FeedPage() {
   const { state, hydrated } = useDemo();
-  const [filter, setFilter] = useState("all");
+  const pathname = usePathname();
+  const [feedTab, setFeedTab] = useState("recommend");
+  const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
+  const activeTags = selectedStyle ? [selectedStyle] : [];
 
-  const sorted = [...state.posts].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  function updateHash(hash: string) {
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", hash ? `${pathname}${hash}` : pathname);
+    }
+  }
+
+  function selectStyle(style: string) {
+    setSelectedStyle(style);
+    updateHash(`#style-${encodeURIComponent(style)}`);
+  }
+
+  function clearFeedFilter() {
+    setSelectedStyle(null);
+    updateHash("");
+  }
+
+  const sorted = [...state.posts]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .filter((post) => {
+      if (activeTags.length === 0) {
+        return true;
+      }
+
+      return postMatchesTags(post, activeTags);
+    });
+  const followedFeed = sorted.filter(
+    (post) =>
+      (post.bloggerId && state.viewer.followedBloggerIds.includes(post.bloggerId)) ||
+      (post.sellerId && state.viewer.followedSellerIds.includes(post.sellerId)),
   );
-
   const feed =
-    filter === "seller"
-      ? sorted.filter((post) => post.type === "seller-look")
-      : filter === "request"
-        ? sorted.filter((post) => post.type === "buyer-request")
-        : sorted;
-
+    feedTab === "latest"
+      ? sorted
+      : feedTab === "following"
+        ? followedFeed.length ? followedFeed : sorted.slice(0, 4)
+        : [
+            ...sorted.filter((post) => post.type === "seller-look").slice(0, 5),
+            ...sorted.filter((post) => post.type === "buyer-request").slice(0, 2),
+          ].sort((left, right) => right.likes - left.likes);
   if (!hydrated) {
     return <LoadingScreen label="正在加载..." />;
   }
@@ -1259,46 +1419,389 @@ export function FeedPage() {
   return (
     <div className="min-h-screen pb-12">
       <AppHeader mode="buyer" />
-      <main className="page-shell grid gap-6 pt-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <main className="page-shell grid gap-6 pt-6 xl:grid-cols-[250px_minmax(0,1fr)_360px]">
+        <aside className="space-y-5 xl:sticky xl:top-28 xl:h-fit">
+          <Card className="rounded-[20px] border border-border/70 bg-white/96 shadow-[0_18px_46px_-36px_rgba(49,40,27,0.45)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-xl">
+                <Search className="size-5" />
+                小红书解析
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-[14px] border border-border/70 bg-background px-3 py-3 text-xs text-muted-foreground">
+                https://www.xiaohongshu.com/...
+              </div>
+              <Link href="/analyze" className={cn(buttonVariants({ variant: "default" }), "w-full bg-[#59623a] hover:bg-[#4b5430]")}>
+                开始解析 <ArrowRight data-icon="inline-end" />
+              </Link>
+              <p className="text-xs text-muted-foreground">AI 提取穿搭与商品，快速发布。</p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-[20px] border border-border/70 bg-white/96 shadow-[0_18px_46px_-36px_rgba(49,40,27,0.45)]">
+            <CardHeader className="flex-row items-center justify-between gap-3">
+              <CardTitle className="text-xl">热门风格</CardTitle>
+              {selectedStyle ? (
+                <button
+                  type="button"
+                  onClick={clearFeedFilter}
+                  className="rounded-full border border-border/70 px-3 py-1 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                >
+                  清除
+                </button>
+              ) : null}
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              {hotStyles.map((style) => (
+                <a
+                  key={style}
+                  href={`#style-${encodeURIComponent(style)}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    selectStyle(style);
+                  }}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-sm transition",
+                    selectedStyle === style
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+                  )}
+                >
+                  {style}
+                </a>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-[20px] border border-border/70 bg-white/96 shadow-[0_18px_46px_-36px_rgba(49,40,27,0.45)]">
+            <CardHeader>
+              <CardTitle className="text-xl">社区趋势</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {communityTrends.map((trend, index) => (
+                <Link
+                  key={trend.id}
+                  href={`/trends/${trend.id}`}
+                  className="flex items-center justify-between rounded-[14px] border-b border-border/60 px-2 py-2 transition last:border-b-0 hover:bg-secondary/50"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{index + 1}. {trend.tone} {trend.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{trend.count} 人在看</p>
+                  </div>
+                  <ArrowRight className="size-4 text-muted-foreground" />
+                </Link>
+              ))}
+              <Link href="/trends/summer-office" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
+                查看全部趋势 <ArrowRight className="ml-1 size-4" />
+              </Link>
+            </CardContent>
+          </Card>
+        </aside>
+
         <section className="min-w-0 space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border/80 bg-white/90 px-5 py-4">
-            <div>
-              <p className="editorial-kicker">OOTD Feed</p>
-              <h1 className="mt-1 text-3xl leading-none">穿搭灵感</h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <ToggleGroup
-                value={[filter]}
-                onValueChange={(value) => value[0] && setFilter(value[0])}
-              >
-                <ToggleGroupItem value="all">全部帖子</ToggleGroupItem>
-                <ToggleGroupItem value="seller">商户穿搭</ToggleGroupItem>
-                <ToggleGroupItem value="request">征集帖</ToggleGroupItem>
-              </ToggleGroup>
-              <Link href="/analyze" className={cn(buttonVariants({ variant: "default" }))}>
-                <Search data-icon="inline-start" />
-                粘贴小红书链接
-              </Link>
-              <Link href="/sell" className={cn(buttonVariants({ variant: "outline" }))}>
-                <Store data-icon="inline-start" />
-                我是商户
-              </Link>
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <ToggleGroup
+              value={[feedTab]}
+              onValueChange={(value) => value[0] && setFeedTab(value[0])}
+              className="rounded-full bg-secondary/70 p-1"
+            >
+              <ToggleGroupItem value="recommend" className="rounded-full px-6 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+                推荐
+              </ToggleGroupItem>
+              <ToggleGroupItem value="latest" className="rounded-full px-6 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+                最新
+              </ToggleGroupItem>
+              <ToggleGroupItem value="following" className="rounded-full px-6 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+                关注
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <Button
+              variant="outline"
+              className="rounded-full"
+              onClick={() => toast.info("当前展示全部类型，后续可接入 AI 风格筛选。")}
+            >
+              全部类型 <ChevronRight className="size-4 rotate-90" />
+            </Button>
           </div>
-          <div className="columns-2 gap-5 md:columns-3 xl:columns-4 2xl:columns-5">
+          {selectedStyle ? (
+            <div className="rounded-[18px] border border-border/70 bg-white/92 px-4 py-3 text-sm">
+              <span>
+                正在查看 <span className="font-semibold">{selectedStyle}</span> 相关社区内容
+              </span>
+            </div>
+          ) : null}
+          <div className="columns-1 gap-5 md:columns-2 2xl:columns-3">
             {feed.map((post, index) => (
               <FeedPostCard key={post.id} post={post} index={index} />
             ))}
           </div>
         </section>
 
-        <aside className="hidden lg:block">
-          <div className="sticky top-24">
+        <aside className="hidden xl:block">
+          <div className="sticky top-28">
             <StatusRail mode="buyer" />
           </div>
         </aside>
       </main>
     </div>
+  );
+}
+
+export function TrendDetailPage({ trendId }: { trendId: string }) {
+  const { state, hydrated } = useDemo();
+  const trend = communityTrends.find((item) => item.id === trendId);
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在加载..." />;
+  }
+
+  if (!trend) {
+    return <MissingScreen title="趋势不存在" description="回社区重新选择一个正在发生的趋势。" />;
+  }
+
+  const trendPosts = state.posts
+    .filter((post) => postMatchesTags(post, trend.tags))
+    .sort((left, right) => right.likes - left.likes);
+
+  return (
+    <div className="min-h-screen pb-12">
+      <AppHeader mode="buyer" />
+      <main className="page-shell grid gap-6 pt-6 xl:grid-cols-[250px_minmax(0,1fr)_360px]">
+        <aside className="space-y-5 xl:sticky xl:top-28 xl:h-fit">
+          <Link
+            href="/"
+            className="flex items-center justify-between rounded-[20px] border border-border/70 bg-white/96 px-4 py-4 text-sm font-semibold shadow-[0_18px_46px_-36px_rgba(49,40,27,0.45)] transition hover:bg-secondary/50"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Home className="size-4" />
+              返回首页
+            </span>
+            <ArrowRight className="size-4 rotate-180 text-muted-foreground" />
+          </Link>
+
+          <Card className="rounded-[20px] border border-border/70 bg-white/96 shadow-[0_18px_46px_-36px_rgba(49,40,27,0.45)]">
+            <CardHeader>
+              <CardTitle className="text-xl">趋势榜单</CardTitle>
+              <CardDescription>点击切换不同社区活动。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {communityTrends.map((item, index) => (
+                <Link
+                  key={item.id}
+                  href={`/trends/${item.id}`}
+                  className={cn(
+                    "grid grid-cols-[32px_minmax(0,1fr)] gap-3 rounded-[16px] px-3 py-3 transition",
+                    item.id === trend.id ? "bg-primary text-primary-foreground" : "hover:bg-secondary/60",
+                  )}
+                >
+                  <span className={cn("font-heading text-2xl leading-none", item.id !== trend.id && "text-muted-foreground")}>
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold">{item.tone} {item.title}</span>
+                    <span className={cn("mt-1 block text-xs", item.id === trend.id ? "text-primary-foreground/72" : "text-muted-foreground")}>
+                      {item.count} 人在看
+                    </span>
+                  </span>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        </aside>
+
+        <section className="min-w-0 space-y-6">
+          <Card className="overflow-hidden rounded-[28px] border border-border/70 bg-white/96 shadow-[0_18px_54px_-40px_rgba(49,40,27,0.55)]">
+            <CardContent className="grid gap-6 p-6 md:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <p className="editorial-kicker">Community Trend</p>
+                <h1 className="mt-3 text-5xl leading-tight">{trend.tone} {trend.title}</h1>
+                <div className="mt-5 space-y-4 text-base leading-8 text-foreground/78">
+                  {trend.summary.map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
+                  ))}
+                </div>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {trend.tags.map((tag) => (
+                    <Badge key={tag} variant="secondary">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-[24px] bg-primary px-5 py-5 text-primary-foreground">
+                <p className="text-sm opacity-75">当前热度</p>
+                <p className="mt-2 text-4xl font-semibold">{trend.count.toLocaleString("zh-CN")}</p>
+                <p className="mt-4 text-sm leading-6 opacity-75">匹配帖子 {trendPosts.length} 条，包含同款、相似风格和征集需求。</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="columns-1 gap-5 md:columns-2 2xl:columns-3">
+            {trendPosts.map((post, index) => (
+              <FeedPostCard key={post.id} post={post} index={index} />
+            ))}
+          </div>
+        </section>
+
+        <aside className="hidden xl:block">
+          <div className="sticky top-28">
+            <StatusRail mode="buyer" />
+          </div>
+        </aside>
+      </main>
+    </div>
+  );
+}
+
+export function SearchResultsPage({ query }: { query: string }) {
+  const { state, hydrated } = useDemo();
+  const trimmedQuery = query.trim();
+  const postResults = trimmedQuery
+    ? state.posts.filter((post) => {
+        const blogger = resolveBlogger(state.bloggers, post.bloggerId);
+        const seller = resolveSeller(state.sellers, post.sellerId);
+        const products = getPostProductIds(post)
+          .map((productId) => resolveProduct(state.products, productId))
+          .filter((product): product is Product => Boolean(product));
+
+        return textMatchesQuery(
+          [
+            post.title,
+            post.body,
+            post.styleTags.join(" "),
+            blogger?.name,
+            seller?.name,
+            products.map((product) => product.name).join(" "),
+            products.flatMap((product) => product.tags).join(" "),
+          ],
+          trimmedQuery,
+        );
+      })
+    : [];
+  const productResults = trimmedQuery
+    ? state.products.filter((product) => {
+        const seller = resolveSeller(state.sellers, product.sellerId);
+
+        return textMatchesQuery(
+          [product.name, product.tags.join(" "), product.material, product.similarityReason, seller?.name, seller?.styleFocus],
+          trimmedQuery,
+        );
+      })
+    : [];
+  const bloggerResults = trimmedQuery
+    ? state.bloggers.filter((blogger) =>
+        textMatchesQuery([blogger.name, blogger.bio, blogger.styleTags.join(" ")], trimmedQuery),
+      )
+    : [];
+  const sellerResults = trimmedQuery
+    ? state.sellers.filter((seller) =>
+        textMatchesQuery([seller.name, seller.bio, seller.styleFocus], trimmedQuery),
+      )
+    : [];
+  const totalResults = postResults.length + productResults.length + bloggerResults.length + sellerResults.length;
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在搜索..." />;
+  }
+
+  return (
+    <LayoutFrame
+      title={trimmedQuery ? `搜索：${trimmedQuery}` : "搜索"}
+      actions={
+        <Link href="/" className={cn(buttonVariants({ variant: "outline" }))}>
+          <Home data-icon="inline-start" />
+          返回社区
+        </Link>
+      }
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+              <div>
+                <p className="editorial-kicker">Search Results</p>
+                <p className="mt-2 text-2xl font-semibold">
+                  {trimmedQuery ? `找到 ${totalResults} 个相关结果` : "在顶部输入关键词后回车搜索"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">帖子 {postResults.length}</Badge>
+                <Badge variant="secondary">商品 {productResults.length}</Badge>
+                <Badge variant="secondary">博主 {bloggerResults.length}</Badge>
+                <Badge variant="secondary">商户 {sellerResults.length}</Badge>
+              </div>
+            </CardContent>
+          </Card>
+
+          {postResults.length ? (
+            <section className="space-y-3">
+              <h2 className="text-3xl">相关社区帖子</h2>
+              <div className="columns-1 gap-5 md:columns-2 2xl:columns-3">
+                {postResults.map((post, index) => (
+                  <FeedPostCard key={post.id} post={post} index={index} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {productResults.length ? (
+            <section className="space-y-3">
+              <h2 className="text-3xl">相关商品</h2>
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {productResults.map((product) => (
+                  <ProductGridCard key={product.id} product={product} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {bloggerResults.length || sellerResults.length ? (
+            <section className="grid gap-5 lg:grid-cols-2">
+              <Card className="soft-panel border-0 bg-white/96 shadow-none">
+                <CardHeader>
+                  <CardTitle>相关博主</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {bloggerResults.length ? (
+                    bloggerResults.map((blogger) => <BloggerMiniCard key={blogger.id} blogger={blogger} />)
+                  ) : (
+                    <EmptyState label="没有匹配博主。" />
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="soft-panel border-0 bg-white/96 shadow-none">
+                <CardHeader>
+                  <CardTitle>相关商户</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {sellerResults.length ? (
+                    sellerResults.map((seller) => <SellerMiniCard key={seller.id} seller={seller} />)
+                  ) : (
+                    <EmptyState label="没有匹配商户。" />
+                  )}
+                </CardContent>
+              </Card>
+            </section>
+          ) : null}
+
+          {trimmedQuery && totalResults === 0 ? (
+            <Card className="soft-panel border-0 bg-white/96 shadow-none">
+              <CardContent className="p-6">
+                <EmptyState label="没有找到结果。可以换个风格词，或去小红书解析发布征集帖。" />
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+
+        <aside className="hidden xl:block">
+          <div className="sticky top-24">
+            <StatusRail mode="buyer" />
+          </div>
+        </aside>
+      </section>
+    </LayoutFrame>
   );
 }
 
@@ -1354,11 +1857,16 @@ export function PostDetailPage({ postId }: { postId: string }) {
     <LayoutFrame
       title="帖子"
     >
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-6">
+      <section className="grid gap-6 xl:grid-cols-[300px_minmax(0,720px)_320px] xl:items-start xl:justify-center">
+        <aside className="order-2 space-y-4 xl:order-1 xl:sticky xl:top-24">
+          <ProductSideSection title="本帖同款" products={attachedProducts} emptyLabel="本帖暂无同款商品。" />
+          <ProductSideSection title="相似风格" products={similarProducts} emptyLabel="暂无相似风格商品。" />
+        </aside>
+
+        <div className="order-1 space-y-4 xl:order-2">
           <Card className="soft-panel overflow-hidden border-0 bg-white/96 shadow-none">
             <div className="relative bg-[#f2ece3]">
-              <img src={displayImage} alt={post.title} className="max-h-[760px] min-h-[520px] w-full object-contain" />
+              <img src={displayImage} alt={post.title} className="mx-auto max-h-[780px] min-h-[560px] w-full object-contain" />
               {floatingTags.map((tag) => {
                 const linkedProduct = resolveProduct(state.products, tag.productId);
                 if (!linkedProduct) {
@@ -1395,7 +1903,7 @@ export function PostDetailPage({ postId }: { postId: string }) {
                 ))}
               </div>
             ) : null}
-            <CardHeader>
+            <CardHeader className="space-y-4">
               {blogger ? (
                 <Link href={`/bloggers/${blogger.id}`} className="mb-2 flex w-fit items-center gap-3 rounded-full pr-3 transition hover:bg-secondary">
                   <Avatar className="size-11 border border-border/70 bg-secondary">
@@ -1414,12 +1922,12 @@ export function PostDetailPage({ postId }: { postId: string }) {
                   </Badge>
                 ))}
               </div>
-              <CardTitle className="text-4xl">{post.title}</CardTitle>
+              <CardTitle className="text-3xl leading-tight sm:text-4xl">{post.title}</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="max-w-3xl whitespace-pre-line text-base leading-8 text-foreground/82">{post.body}</p>
+              <p className="whitespace-pre-line text-base leading-8 text-foreground/82">{post.body}</p>
             </CardContent>
-            <CardFooter className="justify-between gap-3 bg-transparent">
+            <CardFooter className="flex-wrap justify-between gap-3 bg-transparent">
               <button
                 type="button"
                 onClick={() => toggleLike(post.id)}
@@ -1447,12 +1955,9 @@ export function PostDetailPage({ postId }: { postId: string }) {
               生成同款穿搭
             </Link>
           ) : null}
-
-          <ProductRail title="本帖同款" products={attachedProducts} />
-          <ProductRail title="相似风格" products={similarProducts} />
         </div>
 
-        <div className="space-y-4">
+        <aside className="order-3 space-y-4 xl:sticky xl:top-24">
           {blogger ? (
             <Card className="soft-panel border-0 bg-white/96 shadow-none">
               <CardHeader>
@@ -1510,7 +2015,7 @@ export function PostDetailPage({ postId }: { postId: string }) {
               </CardFooter>
             </Card>
           ) : null}
-        </div>
+        </aside>
       </section>
     </LayoutFrame>
   );
@@ -1561,7 +2066,6 @@ export function ProductDetailPage({ productId }: { productId: string }) {
       return;
     }
     setPurchaseSummary(result);
-    toast.success("交易成功，订单已经生成。");
   }
 
   return (
@@ -1569,6 +2073,58 @@ export function ProductDetailPage({ productId }: { productId: string }) {
       title={activeProduct.name}
       description="选择尺码后可试穿或直接购买。"
     >
+      <Dialog open={Boolean(purchaseSummary)} onOpenChange={(open) => !open && setPurchaseSummary(null)}>
+        <DialogContent className="max-w-2xl rounded-[30px] bg-white p-0 text-foreground">
+          {purchaseSummary ? (
+            <>
+              <DialogHeader className="px-6 pt-6">
+                <DialogTitle className="text-4xl">交易成功</DialogTitle>
+                <DialogDescription>
+                  订单已生成，同时完成余额、库存和商户收入的模拟更新。
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-3 px-6 py-5 sm:grid-cols-2">
+                <div className="rounded-[22px] border border-border/70 bg-[#fff8ef] px-4 py-4">
+                  <p className="text-sm text-muted-foreground">用户支付</p>
+                  <p className="mt-2 text-3xl font-semibold text-[#c75b24]">{formatCurrency(purchaseSummary.order.amount)}</p>
+                </div>
+                <div className="rounded-[22px] border border-border/70 bg-[#f0f7ef] px-4 py-4">
+                  <p className="text-sm text-muted-foreground">余额变化</p>
+                  <p className="mt-2 text-3xl font-semibold text-[#315f35]">
+                    {formatCurrency(purchaseSummary.balanceBefore)} → {formatCurrency(purchaseSummary.balanceAfter)}
+                  </p>
+                </div>
+                <div className="rounded-[22px] border border-border/70 bg-secondary/45 px-4 py-4">
+                  <p className="text-sm text-muted-foreground">库存变化</p>
+                  <p className="mt-2 text-3xl font-semibold text-foreground">
+                    {purchaseSummary.stockBefore} → {purchaseSummary.stockAfter}
+                  </p>
+                </div>
+                <div className="rounded-[22px] border border-border/70 bg-[#f4f0ff] px-4 py-4">
+                  <p className="text-sm text-muted-foreground">商户收入</p>
+                  <p className="mt-2 text-3xl font-semibold text-[#5f4595]">
+                    {formatCurrency(purchaseSummary.sellerRevenueBefore)} → {formatCurrency(purchaseSummary.sellerRevenueAfter)}
+                  </p>
+                </div>
+              </div>
+              <div className="mx-6 rounded-[22px] border border-border/70 px-4 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-muted-foreground">订单号</p>
+                    <p className="mt-1 font-semibold">{purchaseSummary.order.id}</p>
+                  </div>
+                  <Badge>{purchaseSummary.order.status}</Badge>
+                </div>
+              </div>
+              <div className="px-6 pb-6 pt-4">
+                <Button onClick={() => setPurchaseSummary(null)} className="w-full">
+                  完成
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-6">
           <Card className="soft-panel border-0 bg-white/96 shadow-none">
@@ -1638,32 +2194,6 @@ export function ProductDetailPage({ productId }: { productId: string }) {
               </div>
             </div>
           </Card>
-
-          {purchaseSummary ? (
-            <Card className="soft-panel border-0 bg-[linear-gradient(180deg,rgba(53,46,39,0.96),rgba(77,68,57,0.94))] text-primary-foreground shadow-none">
-              <CardHeader>
-                <CardTitle className="text-4xl">交易成功</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <MetricCard label="支付" value={formatCurrency(purchaseSummary.order.amount)} />
-                <MetricCard
-                  label="余额变化"
-                  value={`${formatCurrency(purchaseSummary.balanceBefore)} → ${formatCurrency(purchaseSummary.balanceAfter)}`}
-                />
-                <MetricCard label="库存变化" value={`${purchaseSummary.stockBefore} → ${purchaseSummary.stockAfter}`} />
-                <MetricCard
-                  label="商户收入"
-                  value={`${formatCurrency(purchaseSummary.sellerRevenueBefore)} → ${formatCurrency(
-                    purchaseSummary.sellerRevenueAfter,
-                  )}`}
-                />
-              </CardContent>
-              <CardFooter className="justify-between gap-3 border-white/10 bg-transparent text-primary-foreground">
-                <span>{purchaseSummary.order.id}</span>
-                <span>{purchaseSummary.order.status}</span>
-              </CardFooter>
-            </Card>
-          ) : null}
 
           {associatedPosts.length > 0 ? (
             <Card className="soft-panel border-0 bg-white/96 shadow-none">
@@ -2414,6 +2944,8 @@ export function TryOnRoomPage() {
       }
       if (payload.status === "fallback") {
         toast.error(payload.error ? `真实生成失败，已使用预设图：${payload.error}` : "真实生成失败，已使用预设图。");
+      } else if (payload.status === "mock") {
+        toast.success(`已载入 ${nextImages.length} 张 mock 试穿图。`);
       } else {
         toast.success(`Seedream 已生成 ${nextImages.length} 张 AI 试穿图。`);
       }

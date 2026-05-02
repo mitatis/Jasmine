@@ -1,0 +1,62 @@
+{
+  "generatedAt": "2026-05-02T08:44:09.971Z",
+  "model": "doubao-seedream-5-0-260128",
+  "posts": {
+    "post-urban-black": {
+      "path": "/generated/seedream-v1/post-urban-black.jpg",
+      "bloggerId": "blogger-nora"
+    },
+    "post-bomber-night": {
+      "path": "/generated/seedream-v1/post-bomber-night.jpg",
+      "bloggerId": "blogger-nora"
+    },
+    "post-clean-commute": {
+      "path": "/generated/seedream-v1/post-clean-commute.jpg",
+      "bloggerId": "blogger-mika"
+    },
+    "post-sand-gallery": {
+      "path": "/generated/seedream-v1/post-sand-gallery.jpg",
+      "bloggerId": "blogger-mika"
+    },
+    "post-vintage-leather": {
+      "path": "/generated/seedream-v1/post-vintage-leather.jpg",
+      "bloggerId": "blogger-ryan"
+    },
+    "post-denim-cafe": {
+      "path": "/generated/seedream-v1/post-denim-cafe.jpg",
+      "bloggerId": "blogger-ryan"
+    },
+    "post-loose-seoul": {
+      "path": "/generated/seedream-v1/post-loose-seoul.jpg",
+      "bloggerId": "blogger-seo"
+    },
+    "post-ivory-layer": {
+      "path": "/generated/seedream-v1/post-ivory-layer.jpg",
+      "bloggerId": "blogger-seo"
+    },
+    "post-olive-trench": {
+      "path": "/generated/seedream-v1/post-olive-trench.jpg",
+      "bloggerId": "blogger-mika"
+    }
+  },
+  "products": {
+    "product-jacket-black": {
+      "path": "/generated/seedream-v1/product-jacket-black.jpg"
+    },
+    "product-blazer-sand": {
+      "path": "/generated/seedream-v1/product-blazer-sand.jpg"
+    },
+    "product-denim-wash": {
+      "path": "/generated/seedream-v1/product-denim-wash.jpg"
+    },
+    "product-knit-ivory": {
+      "path": "/generated/seedream-v1/product-knit-ivory.jpg"
+    },
+    "product-trench-olive": {
+      "path": "/generated/seedream-v1/product-trench-olive.jpg"
+    },
+    "product-bomber-noir": {
+      "path": "/generated/seedream-v1/product-bomber-noir.jpg"
+    }
+  }
+}

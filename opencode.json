@@ -1,23 +1,13 @@
 {
   "provider": {
-    "openai": {
+    "fish": {
       "options": {
         "baseURL": "https://imagineers.twofishai.com/v1",
-        "apiKey": "<REDACTED>"
+        "apiKey": "sk-nxLVZQX7CwtRKEydhViV1sghsENvUbiGMIVNbgc6EjyNGRuO"
       },
       "models": {
         "qwen3.6-plus": {
-          "name": "Qwen3.6-Plus",
-          "limit": {
-            "context": 1050000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          }
-        },
-        "glm-5.1": {
-          "name": "GLM-5.1",
+          "name": "Qwen 3.6 Plus",
           "limit": {
             "context": 1050000,
             "output": 128000

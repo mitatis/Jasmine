@@ -69,16 +69,38 @@ function cloneSeedState(): DemoState {
 function normalizeState(value: DemoState): DemoState {
   const seed = cloneSeedState();
   const seedPostsById = new Map(seed.posts.map((post) => [post.id, post]));
+  const seedProductsById = new Map(seed.products.map((product) => [product.id, product]));
 
   return {
     ...seed,
     ...value,
     bloggers: value.bloggers?.length ? value.bloggers : seed.bloggers,
     collabRequests: value.collabRequests ?? [],
-    posts: (value.posts?.length ? value.posts : seed.posts).map((post) => ({
-      ...seedPostsById.get(post.id),
-      ...post,
-    })),
+    products: (value.products?.length ? value.products : seed.products).map((product) => {
+      const seedProduct = seedProductsById.get(product.id);
+
+      if (!seedProduct) {
+        return product;
+      }
+
+      return {
+        ...seedProduct,
+        stock: product.stock,
+      };
+    }),
+    posts: (value.posts?.length ? value.posts : seed.posts).map((post) => {
+      const seedPost = seedPostsById.get(post.id);
+
+      if (!seedPost) {
+        return post;
+      }
+
+      return {
+        ...seedPost,
+        likes: post.likes,
+        createdAt: post.createdAt,
+      };
+    }),
     viewer: {
       ...seed.viewer,
       ...value.viewer,
