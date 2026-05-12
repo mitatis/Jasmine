@@ -1,5 +1,5 @@
-import { SellerPostsPage } from "@/components/marketplace-app";
+import { redirect } from "next/navigation";
 
 export default function SellerPostListPage() {
-  return <SellerPostsPage />;
+  redirect("/community");
 }

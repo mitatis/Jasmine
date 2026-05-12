@@ -16,7 +16,6 @@ import {
   Package,
   RefreshCcw,
   Search,
-  Settings,
   Shirt,
   ShoppingBag,
   Sparkles,
@@ -48,7 +47,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
@@ -63,27 +61,22 @@ import { cn } from "@/lib/utils";
 import type {
   AIStyledPostDraft,
   Blogger,
-  Order,
+  CampaignBrief,
+  GeneratedContentDraft,
   Post,
   Product,
+  ProductRecognitionDraft,
   ProfileSectionKey,
   ProfileVisibility,
+  PublishDestination,
+  PublishResult,
+  PublishStatus,
   RequestPost,
   Seller,
   StyleAnalysis,
 } from "@/lib/types";
 
-type PurchaseSummary = {
-  order: Order;
-  balanceBefore: number;
-  balanceAfter: number;
-  stockBefore: number;
-  stockAfter: number;
-  sellerRevenueBefore: number;
-  sellerRevenueAfter: number;
-} | null;
-
-type AppMode = "buyer" | "seller";
+type AppMode = "creator" | "seller" | "community" | "buyer";
 
 type FollowerProfile = {
   id: string;
@@ -115,8 +108,34 @@ const sectionTitles: Record<ProfileSectionKey, string> = {
   followedSellers: "关注的商户",
 };
 
+const destinationLabels: Record<PublishDestination, string> = {
+  community: "我的社区",
+  douyin: "抖音",
+  "xhs-miniapp": "小红书小程序挂载",
+};
+
+const destinationDescriptions: Record<PublishDestination, string> = {
+  community: "默认沉淀到站内内容池",
+  douyin: "待开放平台应用授权后发布",
+  "xhs-miniapp": "通过小程序/商品挂载承接",
+};
+
 function formatCurrency(value: number) {
   return `¥${value}`;
+}
+
+function buildPublishStatusMap(results: PublishResult[]) {
+  return results.reduce<Partial<Record<PublishDestination, PublishStatus>>>(
+    (current, result) => ({
+      ...current,
+      [result.destination]: result.status,
+    }),
+    {},
+  );
+}
+
+function getPublishMessage(results: PublishResult[]) {
+  return results.map((result) => `${destinationLabels[result.destination]}：${result.message}`).join("\n");
 }
 
 function formatShortDate(value: string) {
@@ -180,6 +199,29 @@ function getRecommendedBloggers(product: Product | null, bloggers: Blogger[]) {
     })
     .sort((left, right) => right.score - left.score)
     .slice(0, 3);
+}
+
+function buildCampaignBriefs(products: Product[], sellers: Seller[], blogger: Blogger | null): CampaignBrief[] {
+  return products.slice(0, 8).map((product, index) => {
+    const seller = resolveSeller(sellers, product.sellerId);
+    const overlap = blogger
+      ? blogger.styleTags.filter((tag) => product.tags.includes(tag)).length
+      : 1;
+    const fitScore = Math.min(98, 76 + overlap * 7 + (index % 4) * 3);
+    const suggestedPrice = Math.round((160 + fitScore * 2.2 + index * 18) / 10) * 10;
+    const deadline = new Date(Date.now() + (5 + index) * 24 * 60 * 60 * 1000).toISOString();
+
+    return {
+      id: `campaign-${product.id}`,
+      sellerId: seller?.id ?? product.sellerId,
+      productId: product.id,
+      deliverables: index % 2 === 0 ? ["AI图文 1组", "短视频脚本 1条"] : ["AI穿搭封面 2张", "图文种草文案"],
+      suggestedPrice,
+      fitScore,
+      deadline,
+      status: "open",
+    };
+  });
 }
 
 const hotStyles = ["通勤极简", "高街暗黑", "美式复古", "Clean Fit", "韩系宽松", "针织", "牛仔", "风衣"];
@@ -372,26 +414,18 @@ function LocalImageUploader({
 function AppHeader({ mode }: { mode: AppMode }) {
   const { resetDemo } = useDemo();
   const pathname = usePathname();
-  const router = useRouter();
   const isSeller = mode === "seller";
   const [publishOpen, setPublishOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const userNav = [
-    { href: "/", label: "社区" },
+  const creatorNav = [
+    { href: "/creator", label: "AI内容台" },
     { href: "/products", label: "商城" },
-    { href: "/me", label: "我的" },
+    { href: "/community", label: "我的社区" },
   ];
   const sellerNav = [
-    { href: "/sell", label: "商家发布" },
-    { href: "/seller/posts", label: "社区" },
+    { href: "/seller", label: "商户工作台" },
     { href: "/seller/products", label: "商品" },
+    { href: "/community", label: "内容社区" },
   ];
-
-  function submitSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const query = searchQuery.trim();
-    router.push(query ? `/search?q=${encodeURIComponent(query)}` : "/search");
-  }
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-white/92 backdrop-blur-xl">
@@ -399,16 +433,16 @@ function AppHeader({ mode }: { mode: AppMode }) {
         <div className="flex items-center gap-3">
           <div>
             <Link href="/" className="font-heading text-4xl leading-none tracking-[-0.05em]">
-              穿搭市集
+              Jasmine
             </Link>
             <p className="mt-1 text-xs tracking-[0.18em] text-muted-foreground">
-              {isSeller ? "商户端 · 发布与成交工作台" : "一起发现好看和好穿的日常"}
+              {isSeller ? "商户端 · 商品识别与商单合作" : "博主端 · AI内容与变现工作台"}
             </p>
           </div>
         </div>
 
         <nav className="hidden items-center justify-center gap-8 text-sm md:flex">
-          {(isSeller ? sellerNav : userNav).map((item) => {
+          {(isSeller ? sellerNav : creatorNav).map((item) => {
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
 
             return (
@@ -429,21 +463,6 @@ function AppHeader({ mode }: { mode: AppMode }) {
 
         <div className="flex min-w-0 items-center justify-end gap-2 xl:gap-3">
           {!isSeller ? (
-            <form
-              onSubmit={submitSearch}
-              className="hidden h-11 w-[260px] shrink-0 items-center gap-2 rounded-full border border-border/80 bg-white px-4 text-sm text-muted-foreground shadow-sm transition focus-within:border-primary/40 focus-within:text-foreground xl:flex"
-            >
-              <Search className="size-4" />
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="搜索穿搭、单品、博主、商户"
-                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-              />
-            </form>
-          ) : null}
-
-          {!isSeller ? (
             <>
               <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
                 <Button className="hidden bg-primary px-5 md:inline-flex" onClick={() => setPublishOpen(true)}>
@@ -457,27 +476,30 @@ function AppHeader({ mode }: { mode: AppMode }) {
                   </DialogHeader>
                   <div className="grid gap-3 px-6 pb-6">
                     <Link
-                      href="/create"
+                      href="/creator"
                       onClick={() => setPublishOpen(false)}
                       className="rounded-[24px] border border-border/70 p-4 transition hover:bg-secondary/50"
                     >
-                      <p className="text-xl font-semibold">发图文</p>
-                      <p className="mt-1 text-sm text-muted-foreground">多图发布 / 商单广场 / 发给商户确认。</p>
+                      <p className="text-xl font-semibold">AI 图文</p>
+                      <p className="mt-1 text-sm text-muted-foreground">生成草稿 / 商单广场 / 多平台发布包。</p>
                     </Link>
                     <button
                       type="button"
-                      onClick={() => toast.info("视频发布入口已预留。")}
+                      onClick={() => {
+                        setPublishOpen(false);
+                        window.location.href = "/creator?format=video-script";
+                      }}
                       className="rounded-[24px] border border-border/70 p-4 text-left transition hover:bg-secondary/50"
                     >
-                      <p className="text-xl font-semibold">发视频</p>
-                      <p className="mt-1 text-sm text-muted-foreground">短视频穿搭内容入口。</p>
+                      <p className="text-xl font-semibold">短视频脚本</p>
+                      <p className="mt-1 text-sm text-muted-foreground">生成封面、脚本和平台发布清单。</p>
                     </button>
                   </div>
                 </DialogContent>
               </Dialog>
-              <Link href="/try-on" className={cn(buttonVariants({ variant: "outline" }), "hidden px-5 md:inline-flex")}>
+              <Link href="/creator" className={cn(buttonVariants({ variant: "outline" }), "hidden px-5 md:inline-flex")}>
                 <Sparkles data-icon="inline-start" />
-                AI 试衣间
+                AI 内容台
               </Link>
             </>
           ) : null}
@@ -491,9 +513,9 @@ function AppHeader({ mode }: { mode: AppMode }) {
             <RefreshCcw data-icon="inline-start" />
             重置
           </Button>
-          <Link href={isSeller ? "/" : "/sell"} className={cn(buttonVariants({ variant: "outline" }), "hidden h-11 shrink-0 rounded-full px-4 lg:inline-flex")}>
+          <Link href={isSeller ? "/" : "/seller"} className={cn(buttonVariants({ variant: "outline" }), "hidden h-11 shrink-0 rounded-full px-4 lg:inline-flex")}>
             {isSeller ? <Home data-icon="inline-start" /> : <Store data-icon="inline-start" />}
-            {isSeller ? "切回用户" : "商户端"}
+            {isSeller ? "选择入口" : "商户端"}
           </Link>
           <StatusSheet mode={mode} />
         </div>
@@ -505,7 +527,7 @@ function AppHeader({ mode }: { mode: AppMode }) {
 function LayoutFrame({
   title,
   actions,
-  mode = "buyer",
+  mode = "creator",
   children,
 }: {
   title: string;
@@ -608,52 +630,41 @@ function StatusRail({ mode, compact = false }: { mode: AppMode; compact?: boolea
     <div className={cn("flex flex-col gap-4", compact && "gap-3")}>
         <Card className="soft-panel border-0 bg-white/92 shadow-none">
         <CardHeader>
-          <CardTitle>用户钱包</CardTitle>
+          <CardTitle>博主变现状态</CardTitle>
           </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-[22px] bg-primary px-5 py-4 text-primary-foreground">
-            <p className="text-sm opacity-80">可用余额</p>
-            <p className="mt-2 text-4xl font-semibold">{formatCurrency(state.viewer.balance)}</p>
+            <p className="text-sm opacity-80">内容资产</p>
+            <p className="mt-2 text-4xl font-semibold">{state.posts.filter((post) => post.bloggerId === "blogger-me").length}</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <MetricCard label="关注博主" value={state.viewer.followedBloggerIds.length.toString()} />
             <MetricCard label="点赞帖子" value={state.viewer.likedPostIds.length.toString()} />
             <MetricCard label="购物车" value={state.viewer.cartProductIds.length.toString()} />
-            <MetricCard label="历史订单" value={state.viewer.orders.length.toString()} />
+            <MetricCard label="商单商品" value={state.products.length.toString()} />
           </div>
         </CardContent>
       </Card>
 
       <Card className="soft-panel border-0 bg-white/92 shadow-none">
         <CardHeader>
-          <CardTitle>最近订单</CardTitle>
+          <CardTitle>平台发布状态</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
-            {state.viewer.orders.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                还没有成交订单。先从帖子里点进商品，完成第一笔购买。
-              </div>
-            ) : (
-              state.viewer.orders.map((order) => (
-                <div key={order.id} className="rounded-2xl border border-border/70 px-4 py-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="font-medium">{order.productName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {order.id} · {formatShortDate(order.createdAt)}
-                      </p>
-                    </div>
-                    <Badge>{order.status}</Badge>
+            {(["community", "douyin", "xhs-miniapp"] as PublishDestination[]).map((destination) => (
+              <div key={destination} className="rounded-2xl border border-border/70 px-4 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-medium">{destinationLabels[destination]}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{destinationDescriptions[destination]}</p>
                   </div>
-                  <Separator className="my-3" />
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">用户支付</span>
-                    <span className="font-semibold">{formatCurrency(order.amount)}</span>
-                  </div>
+                  <Badge variant={destination === "community" ? "default" : "secondary"}>
+                    {destination === "community" ? "可发布" : "待配置"}
+                  </Badge>
                 </div>
-              ))
-            )}
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -688,13 +699,101 @@ function MetricCard({ label, value, onClick }: { label: string; value: string; o
   );
 }
 
+export function LandingPage() {
+  const { state, hydrated } = useDemo();
+  const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
+  const campaignCount = Math.min(state.products.length, 8);
+  const communityPosts = state.posts.filter((post) => post.publishDestinations?.includes("community") || post.bloggerId === "blogger-me").length;
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在加载..." />;
+  }
+
+  return (
+    <main className="min-h-screen">
+      <section className="page-shell grid min-h-screen items-center gap-8 py-10 lg:grid-cols-[0.95fr_1.05fr]">
+        <div className="space-y-8">
+          <div>
+            <p className="editorial-kicker">Jasmine MVP</p>
+            <h1 className="mt-4 max-w-3xl text-5xl leading-[1.02] sm:text-6xl lg:text-7xl">
+              AI 内容生产和商单合作，从第一天服务变现。
+            </h1>
+            <p className="mt-5 max-w-2xl text-base leading-8 text-muted-foreground">
+              为穿搭博主、自媒体工作者和服饰商家搭建一条短链路：快速生成可发布内容，展示商业潜力，匹配商品和商单。
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MetricCard label="可接商单" value={campaignCount.toString()} />
+            <MetricCard label="商城商品" value={state.products.length.toString()} />
+            <MetricCard label="社区沉淀" value={communityPosts.toString()} />
+          </div>
+        </div>
+
+        <div className="grid gap-5">
+          <Link
+            href="/creator"
+            className="group overflow-hidden rounded-[28px] border border-border/70 bg-white/96 shadow-[0_18px_50px_-34px_rgba(49,40,27,0.6)] transition hover:-translate-y-1 hover:shadow-[0_28px_70px_-38px_rgba(49,40,27,0.72)]"
+          >
+            <div className="grid gap-0 md:grid-cols-[0.9fr_1.1fr]">
+              <img src={currentBlogger?.coverImage ?? seedProducts[0].tryOnPreset} alt="博主内容工作台" className="h-72 w-full object-cover md:h-full" />
+              <div className="space-y-5 p-6">
+                <Badge>博主端</Badge>
+                <div>
+                  <h2 className="text-4xl">AI 内容与商单广场</h2>
+                  <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                    生成穿搭图文、短视频脚本和平台发布包，默认沉淀到我的社区，并把内容变成商单样张。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary">AI 图文</Badge>
+                  <Badge variant="secondary">短视频脚本</Badge>
+                  <Badge variant="secondary">商单匹配</Badge>
+                </div>
+                <Button className="rounded-full">
+                  进入博主端 <ArrowRight data-icon="inline-end" />
+                </Button>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/seller"
+            className="group overflow-hidden rounded-[28px] border border-border/70 bg-[#28231f] text-white shadow-[0_18px_50px_-34px_rgba(49,40,27,0.6)] transition hover:-translate-y-1 hover:shadow-[0_28px_70px_-38px_rgba(49,40,27,0.72)]"
+          >
+            <div className="grid gap-0 md:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-5 p-6">
+                <Badge className="bg-white text-[#28231f] hover:bg-white">商户端</Badge>
+                <div>
+                  <h2 className="text-4xl">商品识别与合作发布</h2>
+                  <p className="mt-3 text-sm leading-7 text-white/72">
+                    上传商品图自动生成上架草稿，一键进入商城，并把商品转成商单 brief 和 AI 内容素材。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary">商品识别</Badge>
+                  <Badge variant="secondary">一键上架</Badge>
+                  <Badge variant="secondary">博主推荐</Badge>
+                </div>
+                <Button variant="secondary" className="rounded-full">
+                  进入商户端 <ArrowRight data-icon="inline-end" />
+                </Button>
+              </div>
+              <img src={state.products[0]?.image ?? seedProducts[0].image} alt="商户商品工作台" className="h-72 w-full object-cover md:h-full" />
+            </div>
+          </Link>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function FeedPostCard({ post, index }: { post: Post; index: number }) {
   const { state, toggleLike, toggleBloggerFollow } = useDemo();
   const seller = resolveSeller(state.sellers, post.sellerId);
   const blogger = resolveBlogger(state.bloggers, post.bloggerId);
   const isLiked = state.viewer.likedPostIds.includes(post.id);
   const isFollowed = blogger ? state.viewer.followedBloggerIds.includes(blogger.id) : false;
-  const href = post.type === "seller-look" ? `/posts/${post.id}` : `/requests/${post.requestId}`;
+  const href = post.type === "seller-look" ? `/posts/${post.id}` : "/creator";
   const imageHeights = ["h-[310px]", "h-[390px]", "h-[280px]", "h-[350px]", "h-[430px]", "h-[300px]"];
   const attachedProduct = getPostProductIds(post)
     .map((id) => resolveProduct(state.products, id))
@@ -953,7 +1052,7 @@ function ProductGridCard({ product }: { product: Product }) {
   );
 }
 
-export function ProductCatalogPage({ mode = "buyer" }: { mode?: AppMode }) {
+export function ProductCatalogPage({ mode = "creator" }: { mode?: AppMode }) {
   const { state, hydrated } = useDemo();
   const cartProducts = state.products.filter((product) => state.viewer.cartProductIds.includes(product.id));
 
@@ -967,7 +1066,7 @@ export function ProductCatalogPage({ mode = "buyer" }: { mode?: AppMode }) {
       title={mode === "seller" ? "商品" : "商城"}
       actions={
         mode === "seller" ? (
-          <Link href="/sell" className={cn(buttonVariants({ variant: "default" }))}>
+          <Link href="/seller" className={cn(buttonVariants({ variant: "default" }))}>
             <Store data-icon="inline-start" />
             上架商品
           </Link>
@@ -977,15 +1076,11 @@ export function ProductCatalogPage({ mode = "buyer" }: { mode?: AppMode }) {
               <ShoppingCart data-icon="inline-start" />
               购物车 {cartProducts.length}
             </a>
-            <a href="#orders" className={cn(buttonVariants({ variant: "outline" }))}>
-              <ShoppingBag data-icon="inline-start" />
-              历史订单
-            </a>
           </div>
         )
       }
     >
-      {mode === "buyer" ? (
+      {mode !== "seller" ? (
         <a
           href="#cart"
           className="fixed bottom-8 right-8 z-20 hidden size-16 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_18px_42px_-18px_rgba(49,40,27,0.55)] transition hover:-translate-y-1 lg:flex"
@@ -998,14 +1093,14 @@ export function ProductCatalogPage({ mode = "buyer" }: { mode?: AppMode }) {
         </a>
       ) : null}
 
-      <section className={cn("grid gap-6", mode === "buyer" && "xl:grid-cols-[minmax(0,1fr)_360px]")}>
+      <section className={cn("grid gap-6", mode !== "seller" && "xl:grid-cols-[minmax(0,1fr)_360px]")}>
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {state.products.map((product) => (
             <ProductGridCard key={product.id} product={product} />
           ))}
         </div>
 
-        {mode === "buyer" ? (
+        {mode !== "seller" ? (
           <aside className="space-y-5">
             <Card id="cart" className="soft-panel border-0 bg-white/96 shadow-none xl:sticky xl:top-24">
               <CardHeader>
@@ -1033,36 +1128,6 @@ export function ProductCatalogPage({ mode = "buyer" }: { mode?: AppMode }) {
                 )}
               </CardContent>
             </Card>
-
-            <Card id="orders" className="soft-panel border-0 bg-white/96 shadow-none">
-              <CardHeader>
-                <CardTitle>历史订单</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {state.viewer.orders.length > 0 ? (
-                  state.viewer.orders.map((order) => (
-                    <div key={order.id} className="rounded-[18px] border border-border/70 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold">{order.productName}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {order.id} · {formatShortDate(order.createdAt)}
-                          </p>
-                        </div>
-                        <Badge>{order.status}</Badge>
-                      </div>
-                      <Separator className="my-3" />
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">支付</span>
-                        <span className="font-semibold">{formatCurrency(order.amount)}</span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyState label="还没有历史订单。" />
-                )}
-              </CardContent>
-            </Card>
           </aside>
         ) : null}
       </section>
@@ -1083,7 +1148,7 @@ export function SellerPostsPage() {
       mode="seller"
       title="社区"
       actions={
-        <Link href="/sell" className={cn(buttonVariants({ variant: "default" }))}>
+        <Link href="/seller" className={cn(buttonVariants({ variant: "default" }))}>
           <Sparkles data-icon="inline-start" />
           生成帖子
         </Link>
@@ -1101,7 +1166,7 @@ export function SellerPostsPage() {
 function PostMiniCard({ post }: { post: Post }) {
   return (
     <Link
-      href={post.type === "seller-look" ? `/posts/${post.id}` : `/requests/${post.requestId}`}
+      href={post.type === "seller-look" ? `/posts/${post.id}` : "/creator"}
       className="break-inside-avoid overflow-hidden rounded-[22px] border border-border/70 bg-white transition hover:-translate-y-0.5 hover:shadow-[0_18px_42px_-32px_rgba(49,40,27,0.45)]"
     >
       <img src={post.coverImage} alt={post.title} className="h-56 w-full object-cover" />
@@ -1363,6 +1428,75 @@ export function BloggerDetailPage({ bloggerId }: { bloggerId: string }) {
         },
       ]}
     />
+  );
+}
+
+export function CommunityPage() {
+  const { state, hydrated } = useDemo();
+  const [feedTab, setFeedTab] = useState("all");
+  const communityPosts = [...state.posts]
+    .filter((post) => post.publishDestinations?.includes("community") || post.type === "seller-look")
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const myPosts = communityPosts.filter((post) => post.bloggerId === "blogger-me");
+  const sellerPosts = communityPosts.filter((post) => post.sellerId);
+  const feed = feedTab === "mine" ? myPosts : feedTab === "seller" ? sellerPosts : communityPosts;
+
+  if (!hydrated) {
+    return <LoadingScreen label="正在加载..." />;
+  }
+
+  return (
+    <LayoutFrame
+      mode="community"
+      title="我的社区"
+      actions={
+        <>
+          <Link href="/creator" className={cn(buttonVariants({ variant: "default" }))}>
+            <Sparkles data-icon="inline-start" />
+            生成内容
+          </Link>
+          <Link href="/seller" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Store data-icon="inline-start" />
+            商户端
+          </Link>
+        </>
+      }
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <ToggleGroup
+              value={[feedTab]}
+              onValueChange={(value) => value[0] && setFeedTab(value[0])}
+              className="rounded-full bg-secondary/70 p-1"
+            >
+              <ToggleGroupItem value="all" className="rounded-full px-6 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+                全部沉淀
+              </ToggleGroupItem>
+              <ToggleGroupItem value="mine" className="rounded-full px-6 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+                我的内容
+              </ToggleGroupItem>
+              <ToggleGroupItem value="seller" className="rounded-full px-6 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+                商户内容
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <Badge variant="secondary">社区暂作为默认发布沉淀，不做主增长入口</Badge>
+          </div>
+          {feed.length ? (
+            <div className="columns-1 gap-5 md:columns-2 2xl:columns-3">
+              {feed.map((post, index) => (
+                <FeedPostCard key={post.id} post={post} index={index} />
+              ))}
+            </div>
+          ) : (
+            <EmptyState label="还没有内容。去博主端生成第一条 AI 内容。" />
+          )}
+        </div>
+        <aside className="hidden xl:block">
+          <StatusRail mode="community" />
+        </aside>
+      </section>
+    </LayoutFrame>
   );
 }
 
@@ -2026,10 +2160,9 @@ export function PostDetailPage({ postId }: { postId: string }) {
 }
 
 export function ProductDetailPage({ productId }: { productId: string }) {
-  const { state, toggleCartProduct, purchaseProduct, trackView } = useDemo();
+  const { state, toggleCartProduct, trackView } = useDemo();
   const [selectedSize, setSelectedSize] = useState("");
   const [sort, setSort] = useState("similarity");
-  const [purchaseSummary, setPurchaseSummary] = useState<PurchaseSummary>(null);
   const product = state.products.find((item) => item.id === productId);
   const seller = resolveSeller(state.sellers, product?.sellerId);
   const inCart = state.viewer.cartProductIds.includes(productId);
@@ -2057,78 +2190,18 @@ export function ProductDetailPage({ productId }: { productId: string }) {
       });
 
   if (!product) {
-    return <MissingScreen title="商品不存在" description="这个商品可能被重置了，回社区重新挑一件。" />;
+    return <MissingScreen title="商品不存在" description="这个商品可能被重置了，回商城重新挑一件。" />;
   }
 
   const activeProduct = product;
   const associatedPosts = getProductPosts(state.posts, activeProduct.id);
   const sizeGuide = getSizeGuide(activeProduct);
 
-  function handlePurchase() {
-    const result = purchaseProduct({ productId: activeProduct.id, size: selectedSize });
-    if (!result) {
-      return;
-    }
-    setPurchaseSummary(result);
-  }
-
   return (
     <LayoutFrame
       title={activeProduct.name}
-      description="选择尺码后可试穿或直接购买。"
+      description="商品详情保留尺码、素材和内容联动；成交闭环暂不进入 MVP。"
     >
-      <Dialog open={Boolean(purchaseSummary)} onOpenChange={(open) => !open && setPurchaseSummary(null)}>
-        <DialogContent className="max-w-2xl rounded-[30px] bg-white p-0 text-foreground">
-          {purchaseSummary ? (
-            <>
-              <DialogHeader className="px-6 pt-6">
-                <DialogTitle className="text-4xl">交易成功</DialogTitle>
-                <DialogDescription>
-                  订单已生成，同时完成余额、库存和商户收入的模拟更新。
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-3 px-6 py-5 sm:grid-cols-2">
-                <div className="rounded-[22px] border border-border/70 bg-[#fff8ef] px-4 py-4">
-                  <p className="text-sm text-muted-foreground">用户支付</p>
-                  <p className="mt-2 text-3xl font-semibold text-[#c75b24]">{formatCurrency(purchaseSummary.order.amount)}</p>
-                </div>
-                <div className="rounded-[22px] border border-border/70 bg-[#f0f7ef] px-4 py-4">
-                  <p className="text-sm text-muted-foreground">余额变化</p>
-                  <p className="mt-2 text-3xl font-semibold text-[#315f35]">
-                    {formatCurrency(purchaseSummary.balanceBefore)} → {formatCurrency(purchaseSummary.balanceAfter)}
-                  </p>
-                </div>
-                <div className="rounded-[22px] border border-border/70 bg-secondary/45 px-4 py-4">
-                  <p className="text-sm text-muted-foreground">库存变化</p>
-                  <p className="mt-2 text-3xl font-semibold text-foreground">
-                    {purchaseSummary.stockBefore} → {purchaseSummary.stockAfter}
-                  </p>
-                </div>
-                <div className="rounded-[22px] border border-border/70 bg-[#f4f0ff] px-4 py-4">
-                  <p className="text-sm text-muted-foreground">商户收入</p>
-                  <p className="mt-2 text-3xl font-semibold text-[#5f4595]">
-                    {formatCurrency(purchaseSummary.sellerRevenueBefore)} → {formatCurrency(purchaseSummary.sellerRevenueAfter)}
-                  </p>
-                </div>
-              </div>
-              <div className="mx-6 rounded-[22px] border border-border/70 px-4 py-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-muted-foreground">订单号</p>
-                    <p className="mt-1 font-semibold">{purchaseSummary.order.id}</p>
-                  </div>
-                  <Badge>{purchaseSummary.order.status}</Badge>
-                </div>
-              </div>
-              <div className="px-6 pb-6 pt-4">
-                <Button onClick={() => setPurchaseSummary(null)} className="w-full">
-                  完成
-                </Button>
-              </div>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-6">
           <Card className="soft-panel border-0 bg-white/96 shadow-none">
@@ -2182,14 +2255,14 @@ export function ProductDetailPage({ productId }: { productId: string }) {
                   </ToggleGroup>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Link href={`/try-on?productId=${activeProduct.id}`} className={cn(buttonVariants({ variant: "outline" }))}>
+                  <Link href={`/creator?productId=${activeProduct.id}`} className={cn(buttonVariants({ variant: "outline" }))}>
                     <Sparkles data-icon="inline-start" />
-                    去 AI 试衣间
+                    生成商单内容
                   </Link>
-                  <Button onClick={handlePurchase}>
-                    <ShoppingBag data-icon="inline-start" />
-                    立即购买
-                  </Button>
+                  <Link href={`/try-on?productId=${activeProduct.id}`} className={cn(buttonVariants({ variant: "outline" }))}>
+                    <ImagePlus data-icon="inline-start" />
+                    打开试衣间
+                  </Link>
                 </div>
                 <Button variant={inCart ? "default" : "secondary"} onClick={() => toggleCartProduct(activeProduct.id)}>
                   <ShoppingCart data-icon="inline-start" />
@@ -2300,12 +2373,42 @@ export function SellPage() {
     image: seedProducts[0].image,
   });
   const [productImages, setProductImages] = useState<string[]>([seedProducts[0].image]);
+  const [recognitionDraft, setRecognitionDraft] = useState<ProductRecognitionDraft | null>(null);
   const [createdProduct, setCreatedProduct] = useState<Product | null>(null);
   const [draft, setDraft] = useState<AIStyledPostDraft | null>(null);
   const [invitedBloggerId, setInvitedBloggerId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const recommendedBloggers = getRecommendedBloggers(createdProduct, state.bloggers);
   const pendingCollabRequests = state.collabRequests.filter((request) => request.status === "pending");
+
+  async function analyzeProductImage() {
+    const image = productImages[0] ?? form.image;
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/seller/products/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sellerId: form.sellerId, image, hint: form.name }),
+      });
+      const draft = (await response.json()) as ProductRecognitionDraft;
+      setRecognitionDraft(draft);
+      setForm((current) => ({
+        ...current,
+        sellerId: draft.sellerId,
+        name: draft.name,
+        price: draft.price,
+        stock: draft.stock,
+        sizes: draft.sizes,
+        material: draft.material,
+        tags: draft.tags.join(","),
+        image: draft.image,
+      }));
+      setProductImages([draft.image]);
+      toast.success("商品识别草稿已生成，可编辑后上架。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function createProduct() {
     setSubmitting(true);
@@ -2365,8 +2468,8 @@ export function SellPage() {
         body: JSON.stringify({ productId: createdProduct.id, draft }),
       });
       publishSellerPost(createdProduct, draft);
-      toast.success("帖子已发布到社区首页。");
-      router.push("/");
+      toast.success("内容已发布到社区沉淀页。");
+      router.push("/community");
     } finally {
       setSubmitting(false);
     }
@@ -2385,21 +2488,21 @@ export function SellPage() {
   return (
     <LayoutFrame
       mode="seller"
-      title="商户发布"
-      description="上架商品，生成 AI 穿搭帖并发布到社区。"
+      title="商户工作台"
+      description="识别商品、上架商城，并生成可用于商单合作的内容素材。"
       actions={
         <>
           <Link href="/seller/products" className={cn(buttonVariants({ variant: "outline" }))}>
             <Package data-icon="inline-start" />
             商品
           </Link>
-          <Link href="/seller/posts" className={cn(buttonVariants({ variant: "outline" }))}>
+          <Link href="/community" className={cn(buttonVariants({ variant: "outline" }))}>
             <Shirt data-icon="inline-start" />
-            帖子
+            内容社区
           </Link>
-          <Link href="/" className={cn(buttonVariants({ variant: "outline" }))}>
+          <Link href="/creator" className={cn(buttonVariants({ variant: "outline" }))}>
             <Home data-icon="inline-start" />
-            切回用户
+            博主端
           </Link>
         </>
       }
@@ -2407,9 +2510,25 @@ export function SellPage() {
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card className="soft-panel border-0 bg-white/96 shadow-none">
           <CardHeader>
-            <CardTitle className="text-3xl">1. 商品上架</CardTitle>
+            <CardTitle className="text-3xl">1. 商品识别与上架</CardTitle>
+            <CardDescription>先上传商品图，系统生成可编辑的商品信息草稿；确认后进入商城和商单素材库。</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <LocalImageUploader label="上传商品图片" images={productImages} onChange={setProductImages} multiple={false} />
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Button type="button" variant="outline" onClick={analyzeProductImage} disabled={submitting || !productImages.length}>
+                  {submitting ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}
+                  AI 识别商品
+                </Button>
+                {recognitionDraft ? (
+                  <Badge variant="secondary">{recognitionDraft.confidence}% 识别置信度</Badge>
+                ) : null}
+              </div>
+              {recognitionDraft ? (
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{recognitionDraft.notes}</p>
+              ) : null}
+            </div>
             <label className="flex flex-col gap-2 text-sm">
               商户
               <select
@@ -2448,14 +2567,11 @@ export function SellPage() {
               风格标签
               <Input value={form.tags} onChange={(event) => setForm((current) => ({ ...current, tags: event.target.value }))} placeholder="高街暗黑,短夹克,通勤" />
             </label>
-            <div className="md:col-span-2">
-              <LocalImageUploader label="上传商品图片" images={productImages} onChange={setProductImages} multiple={false} />
-            </div>
           </CardContent>
           <CardFooter className="justify-end gap-3 bg-transparent">
             <Button onClick={createProduct} disabled={submitting || !form.name.trim()}>
               {submitting ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <ShoppingBag data-icon="inline-start" />}
-              上架商品
+              一键上架到商城
             </Button>
           </CardFooter>
         </Card>
@@ -3000,14 +3116,14 @@ export function TryOnRoomPage() {
       suggestedPrice,
       fitScore,
     });
-    router.push("/create");
+    router.push("/creator");
   }
 
   return (
     <LayoutFrame
       title="AI 试衣间"
       actions={
-        <Link href={isCommission ? "/create" : "/products"} className={cn(buttonVariants({ variant: "outline" }))}>
+        <Link href={isCommission ? "/creator" : "/products"} className={cn(buttonVariants({ variant: "outline" }))}>
           <Home data-icon="inline-start" />
           返回
         </Link>
@@ -3138,7 +3254,342 @@ export function TryOnRoomPage() {
   );
 }
 
+export function CreatorWorkspacePage() {
+  const { state, publishUserPost, submitCollabRequest } = useDemo();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
+  const initialProductId = searchParams.get("productId") ?? state.products[0]?.id ?? "";
+  const [selectedProductId, setSelectedProductId] = useState(initialProductId);
+  const [format, setFormat] = useState<GeneratedContentDraft["format"]>(
+    searchParams.get("format") === "video-script" ? "video-script" : "image-post",
+  );
+  const [prompt, setPrompt] = useState("突出真实上身效果、适合人群和可复用搭配公式。");
+  const [destinations, setDestinations] = useState<PublishDestination[]>(["community"]);
+  const [draft, setDraft] = useState<GeneratedContentDraft | null>(null);
+  const [publishResults, setPublishResults] = useState<PublishResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const selectedProduct = resolveProduct(state.products, selectedProductId) ?? state.products[0];
+  const selectedSeller = resolveSeller(state.sellers, selectedProduct?.sellerId);
+  const campaignBriefs = buildCampaignBriefs(state.products, state.sellers, currentBlogger);
+  const realFollowers = getCurrentUserFollowers(state.bloggers);
+  const receivedLikes = getBloggerPosts(state.posts, currentBlogger?.id ?? "blogger-me").reduce((sum, post) => sum + post.likes, 0);
+  const monetizationScore = Math.min(98, 62 + Math.floor(realFollowers.length / 120) + Math.floor(receivedLikes / 12));
+
+  function toggleDestination(destination: PublishDestination) {
+    setDestinations((current) => {
+      if (destination === "community") {
+        return current.includes(destination) ? current : [destination, ...current];
+      }
+
+      return current.includes(destination)
+        ? current.filter((item) => item !== destination)
+        : [...current, destination];
+    });
+  }
+
+  async function generateContent(nextProductId = selectedProductId, nextFormat = format) {
+    const product = resolveProduct(state.products, nextProductId) ?? selectedProduct;
+    if (!product) {
+      toast.error("请先选择一个商品或商单。");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/content/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format: nextFormat,
+          productId: product.id,
+          sellerId: product.sellerId,
+          bloggerId: currentBlogger?.id ?? "blogger-me",
+          prompt,
+          destinations,
+        }),
+      });
+      const payload = (await response.json()) as GeneratedContentDraft;
+      setDraft(payload);
+      setPublishResults([]);
+      toast.success(nextFormat === "video-script" ? "短视频脚本已生成。" : "AI 图文草稿已生成。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function publishDraft() {
+    if (!draft) {
+      toast.error("请先生成内容草稿。");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft, destinations }),
+      });
+      const payload = (await response.json()) as { results: PublishResult[]; summary: string };
+      setPublishResults(payload.results);
+      toast.info(getPublishMessage(payload.results));
+
+      if (destinations.includes("community")) {
+        const post = publishUserPost({
+          title: draft.title,
+          body: draft.body,
+          coverImage: draft.media[0] ?? selectedProduct?.tryOnPreset ?? seedProducts[0].tryOnPreset,
+          images: draft.media,
+          tags: draft.tags,
+          productIds: draft.productIds,
+          contentFormat: draft.format,
+          publishDestinations: destinations,
+          externalPublishStatus: buildPublishStatusMap(payload.results),
+        });
+        router.push(`/posts/${post.id}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function sendDraftToSeller() {
+    if (!draft || !selectedProduct || !currentBlogger) {
+      toast.error("请先生成商单内容草稿。");
+      return;
+    }
+
+    const fitScore = campaignBriefs.find((brief) => brief.productId === selectedProduct.id)?.fitScore ?? 88;
+    const suggestedPrice = campaignBriefs.find((brief) => brief.productId === selectedProduct.id)?.suggestedPrice ?? 360;
+    submitCollabRequest({
+      sellerId: selectedProduct.sellerId,
+      productId: selectedProduct.id,
+      bloggerId: currentBlogger.id,
+      title: draft.title,
+      body: draft.body,
+      coverImage: draft.media[0] ?? selectedProduct.tryOnPreset,
+      tags: draft.tags,
+      suggestedPrice,
+      fitScore,
+    });
+    router.push("/seller");
+  }
+
+  function startCampaign(brief: CampaignBrief) {
+    const product = resolveProduct(state.products, brief.productId);
+    if (!product) {
+      return;
+    }
+
+    setSelectedProductId(product.id);
+    setFormat("image-post");
+    setPrompt(`围绕商单交付物：${brief.deliverables.join("、")}，突出 ${product.tags.slice(0, 3).join(" / ")}。`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  return (
+    <LayoutFrame
+      mode="creator"
+      title="博主 AI 内容工作台"
+      actions={
+        <>
+          <Link href="/community" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Shirt data-icon="inline-start" />
+            我的社区
+          </Link>
+          <Link href="/products" className={cn(buttonVariants({ variant: "outline" }))}>
+            <ShoppingCart data-icon="inline-start" />
+            商城
+          </Link>
+        </>
+      }
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="space-y-6">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-3xl">AI 内容生成</CardTitle>
+                  <CardDescription>先选商品，再生成图文或短视频脚本；我的社区默认开启，用于沉淀内容资产。</CardDescription>
+                </div>
+                <Badge>{monetizationScore}% 变现潜力</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="flex flex-col gap-2 text-sm">
+                  商单商品
+                  <select
+                    value={selectedProductId}
+                    onChange={(event) => setSelectedProductId(event.target.value)}
+                    className="h-11 rounded-2xl border border-input bg-background px-4"
+                  >
+                    {state.products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-2 text-sm">
+                  内容格式
+                  <ToggleGroup
+                    value={[format]}
+                    onValueChange={(value) => {
+                      const next = value[0] as GeneratedContentDraft["format"] | undefined;
+                      if (next) {
+                        setFormat(next);
+                      }
+                    }}
+                    className="justify-start"
+                  >
+                    <ToggleGroupItem value="image-post">AI图文</ToggleGroupItem>
+                    <ToggleGroupItem value="video-script">短视频脚本</ToggleGroupItem>
+                  </ToggleGroup>
+                </label>
+              </div>
+              <label className="flex flex-col gap-2 text-sm">
+                内容要求
+                <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} />
+              </label>
+              <div className="grid gap-3 rounded-[22px] border border-border/70 p-4">
+                <p className="text-sm font-medium">发布目的地</p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(["community", "douyin", "xhs-miniapp"] as PublishDestination[]).map((destination) => (
+                    <button
+                      key={destination}
+                      type="button"
+                      onClick={() => toggleDestination(destination)}
+                      className={cn(
+                        "rounded-[18px] border px-4 py-3 text-left text-sm transition",
+                        destinations.includes(destination)
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border/70 bg-white hover:bg-secondary/50",
+                      )}
+                    >
+                      <span className="block font-semibold">{destinationLabels[destination]}</span>
+                      <span className="mt-1 block text-xs opacity-75">{destinationDescriptions[destination]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="flex-wrap justify-end gap-3 bg-transparent">
+              <Button onClick={() => generateContent()} disabled={loading || !selectedProduct}>
+                {loading ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
+                生成内容草稿
+              </Button>
+              <Button variant="outline" onClick={publishDraft} disabled={loading || !draft}>
+                <ArrowRight data-icon="inline-start" />
+                一键发布/生成发布包
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-3xl">商单广场</CardTitle>
+              <CardDescription>按商品和博主风格自动计算适配度与建议报价，粉丝门槛仅作为潜力提示。</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              {campaignBriefs.map((brief) => {
+                const product = resolveProduct(state.products, brief.productId);
+                const seller = resolveSeller(state.sellers, brief.sellerId);
+                if (!product) {
+                  return null;
+                }
+
+                return (
+                  <div key={brief.id} className="rounded-[24px] border border-border/70 bg-white p-4">
+                    <img src={product.image} alt={product.name} className="h-48 w-full rounded-[18px] object-cover" />
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{product.name}</p>
+                          <p className="text-sm text-muted-foreground">{seller?.name ?? "商户"} · {formatShortDate(brief.deadline)} 截止</p>
+                        </div>
+                        <Badge>{brief.fitScore}% 适配</Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {brief.deliverables.map((item) => (
+                          <Badge key={item} variant="secondary">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="rounded-[18px] bg-secondary/60 px-4 py-3">
+                        <p className="text-xs text-muted-foreground">建议报价</p>
+                        <p className="mt-1 text-2xl font-semibold">{formatCurrency(brief.suggestedPrice)}</p>
+                      </div>
+                      <Button variant="outline" className="w-full" onClick={() => startCampaign(brief)}>
+                        <Sparkles data-icon="inline-start" />
+                        用这个商单生成内容
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
+
+        <aside className="space-y-4">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none lg:sticky lg:top-24">
+            <CardHeader>
+              <CardTitle>草稿预览</CardTitle>
+              <CardDescription>{selectedSeller?.name ?? "商户"} · {selectedProduct?.name ?? "商品"}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <img
+                src={draft?.media[0] ?? selectedProduct?.tryOnPreset ?? seedProducts[0].tryOnPreset}
+                alt="内容草稿预览"
+                className="h-[520px] w-full rounded-[26px] object-cover"
+              />
+              <div>
+                <p className="text-xl font-semibold">{draft?.title ?? "生成后这里会展示标题"}</p>
+                <p className="mt-2 whitespace-pre-line text-sm leading-7 text-muted-foreground">
+                  {draft?.body ?? "AI 图文会展示正文，短视频模式会展示分镜脚本。"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(draft?.tags ?? selectedProduct?.tags ?? []).slice(0, 6).map((tag) => (
+                  <Badge key={tag} variant="secondary">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+              {publishResults.length ? (
+                <div className="grid gap-2">
+                  {publishResults.map((result) => (
+                    <div key={result.destination} className="rounded-[16px] border border-border/70 px-3 py-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">{destinationLabels[result.destination]}</span>
+                        <Badge variant={result.status === "published" ? "default" : "secondary"}>{result.status}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{result.message}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <Button variant="outline" onClick={sendDraftToSeller} disabled={!draft} className="w-full">
+                <Store data-icon="inline-start" />
+                发送给商户确认合作
+              </Button>
+            </CardContent>
+          </Card>
+        </aside>
+      </section>
+    </LayoutFrame>
+  );
+}
+
 export function CreatePage() {
+  return <CreatorWorkspacePage />;
+}
+
+export function LegacyCreatePage() {
   const { state, publishUserPost } = useDemo();
   const router = useRouter();
   const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
@@ -3373,9 +3824,9 @@ export function MePage() {
         name={currentBlogger.name}
         subtitle="本人视角 · 用户主页"
         actions={
-          <Link href="/settings" className={cn(buttonVariants({ variant: "outline" }))}>
-            <Settings data-icon="inline-start" />
-            可见度设置
+          <Link href="/creator" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Sparkles data-icon="inline-start" />
+            内容工作台
           </Link>
         }
         stats={[
@@ -3565,7 +4016,7 @@ function MissingScreen({ title, description }: { title: string; description: str
         </CardHeader>
         <CardFooter className="bg-transparent">
           <Link href="/" className={cn(buttonVariants({ variant: "default" }))}>
-            回到社区首页
+            回到入口页
           </Link>
         </CardFooter>
       </Card>

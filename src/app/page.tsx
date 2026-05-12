@@ -1,5 +1,5 @@
-import { FeedPage } from "@/components/marketplace-app";
+import { LandingPage } from "@/components/marketplace-app";
 
 export default function Page() {
-  return <FeedPage />;
+  return <LandingPage />;
 }

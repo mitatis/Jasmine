@@ -17,21 +17,17 @@ import type {
   Blogger,
   CollabRequest,
   DemoState,
-  Order,
   Post,
   Product,
   ProfileSectionKey,
   ProfileVisibility,
+  PublishDestination,
+  PublishStatus,
   RequestPost,
   Seller,
 } from "@/lib/types";
 
 const STORAGE_KEY = "jasmine-demo-state-v1";
-
-type PurchasePayload = {
-  productId: string;
-  size: string;
-};
 
 type DemoContextValue = {
   state: DemoState;
@@ -50,6 +46,9 @@ type DemoContextValue = {
     images?: string[];
     tags: string[];
     productIds?: string[];
+    contentFormat?: Post["contentFormat"];
+    publishDestinations?: PublishDestination[];
+    externalPublishStatus?: Partial<Record<PublishDestination, PublishStatus>>;
   }) => Post;
   publishSellerPost: (product: Product, draft: { title: string; caption: string; modelImage: string; tags: string[] }) => void;
   publishBloggerCollabPost: (product: Product, blogger: Blogger) => void;
@@ -57,7 +56,6 @@ type DemoContextValue = {
   approveCollabRequest: (requestId: string) => void;
   addProduct: (product: Product) => void;
   addRequest: (request: RequestPost, post: Post) => void;
-  purchaseProduct: (payload: PurchasePayload) => { order: Order; balanceBefore: number; balanceAfter: number; stockBefore: number; stockAfter: number; sellerRevenueBefore: number; sellerRevenueAfter: number } | null;
   resetDemo: () => void;
 };
 
@@ -186,7 +184,6 @@ function normalizeState(value: DemoState): DemoState {
         ...seed.viewer.sectionVisibility,
         ...(value.viewer?.sectionVisibility ?? {}),
       },
-      orders: value.viewer?.orders ?? [],
       viewHistory: value.viewer?.viewHistory ?? [],
     },
   };
@@ -408,6 +405,9 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
           styleTags: payload.tags,
           likes: 0,
           createdAt: new Date().toISOString(),
+          contentFormat: payload.contentFormat ?? "image-post",
+          publishDestinations: payload.publishDestinations ?? ["community"],
+          externalPublishStatus: payload.externalPublishStatus,
         };
 
         setState((current) => ({
@@ -577,76 +577,6 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
           requests: [request, ...current.requests],
           posts: [post, ...current.posts],
         }));
-      },
-      purchaseProduct({ productId, size }) {
-        let result: DemoContextValue["purchaseProduct"] extends (...args: never[]) => infer T ? T : never = null;
-
-        setState((current) => {
-          const product = current.products.find((item) => item.id === productId);
-          if (!product) {
-            toast.error("商品不存在。");
-            return current;
-          }
-
-          const seller = current.sellers.find((item) => item.id === product.sellerId);
-          if (!seller) {
-            toast.error("商户不存在。");
-            return current;
-          }
-
-          if (!size) {
-            toast.error("请先选择尺码。");
-            return current;
-          }
-
-          if (product.stock < 1) {
-            toast.error("库存不足，暂时无法购买。");
-            return current;
-          }
-
-          if (current.viewer.balance < product.price) {
-            toast.error("余额不足，请换一件看看。");
-            return current;
-          }
-
-          const nextOrder: Order = {
-            id: `ORD-${current.viewer.orders.length + 1}`.padEnd(8, "0"),
-            productId,
-            productName: product.name,
-            sellerId: seller.id,
-            amount: product.price,
-            size,
-            status: "已成交",
-            createdAt: new Date().toISOString(),
-          };
-
-          result = {
-            order: nextOrder,
-            balanceBefore: current.viewer.balance,
-            balanceAfter: current.viewer.balance - product.price,
-            stockBefore: product.stock,
-            stockAfter: product.stock - 1,
-            sellerRevenueBefore: seller.revenue,
-            sellerRevenueAfter: seller.revenue + product.price,
-          };
-
-          return {
-            ...current,
-            products: current.products.map((item) =>
-              item.id === productId ? { ...item, stock: item.stock - 1 } : item,
-            ),
-            sellers: current.sellers.map((item) =>
-              item.id === seller.id ? { ...item, revenue: item.revenue + product.price } : item,
-            ),
-            viewer: {
-              ...current.viewer,
-              balance: current.viewer.balance - product.price,
-              orders: [nextOrder, ...current.viewer.orders],
-            },
-          };
-        });
-
-        return result;
       },
       resetDemo() {
         setState(cloneSeedState());

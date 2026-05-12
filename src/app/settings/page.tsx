@@ -1,5 +1,5 @@
-import { SettingsPage } from "@/components/marketplace-app";
+import { redirect } from "next/navigation";
 
 export default function Settings() {
-  return <SettingsPage />;
+  redirect("/creator");
 }

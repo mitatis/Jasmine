@@ -608,7 +608,6 @@ export const seedDemoState: DemoState = {
   requests: [...generatedRequests, ...seedRequests],
   collabRequests: [],
   viewer: {
-    balance: 500,
     likedPostIds: [],
     savedPostIds: [],
     followedSellerIds: [],
@@ -621,7 +620,6 @@ export const seedDemoState: DemoState = {
       followedBloggers: "public",
       followedSellers: "public",
     },
-    orders: [],
     viewHistory: [],
   },
 };

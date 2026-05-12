@@ -67,6 +67,33 @@ export type Post = {
   likes: number;
   createdAt: string;
   priceLabel?: string;
+  contentFormat?: GeneratedContentFormat;
+  publishDestinations?: PublishDestination[];
+  externalPublishStatus?: Partial<Record<PublishDestination, PublishStatus>>;
+};
+
+export type GeneratedContentFormat = "image-post" | "video-script";
+
+export type PublishDestination = "community" | "douyin" | "xhs-miniapp";
+
+export type PublishStatus = "published" | "needs_auth" | "configured" | "failed";
+
+export type PublishResult = {
+  destination: PublishDestination;
+  status: PublishStatus;
+  message: string;
+  externalUrl?: string;
+};
+
+export type CampaignBrief = {
+  id: string;
+  sellerId: string;
+  productId: string;
+  deliverables: string[];
+  suggestedPrice: number;
+  fitScore: number;
+  deadline: string;
+  status: "open" | "matched" | "closed";
 };
 
 export type AIStyledPostDraft = {
@@ -77,6 +104,32 @@ export type AIStyledPostDraft = {
   modelImage: string;
   tags: string[];
   status: "draft" | "ready" | "failed";
+};
+
+export type GeneratedContentDraft = {
+  id: string;
+  format: GeneratedContentFormat;
+  title: string;
+  body: string;
+  tags: string[];
+  media: string[];
+  productIds: string[];
+  sellerId?: string;
+  bloggerId?: string;
+  publishDestinations: PublishDestination[];
+};
+
+export type ProductRecognitionDraft = {
+  sellerId: string;
+  image: string;
+  name: string;
+  price: string;
+  stock: string;
+  sizes: string;
+  material: string;
+  tags: string[];
+  confidence: number;
+  notes: string;
 };
 
 export type Offer = {
@@ -134,7 +187,6 @@ export type CollabRequest = {
 };
 
 export type ViewerState = {
-  balance: number;
   likedPostIds: string[];
   savedPostIds: string[];
   followedSellerIds: string[];
@@ -142,7 +194,6 @@ export type ViewerState = {
   favoriteProductIds: string[];
   cartProductIds: string[];
   sectionVisibility: Record<ProfileSectionKey, ProfileVisibility>;
-  orders: Order[];
   viewHistory: string[];
 };
 

@@ -4,8 +4,8 @@ import { DemoProvider } from "@/components/demo-provider";
 import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: "穿搭市集",
-  description: "社区驱动的穿搭交易市场：发帖、找款、试穿、下单、征集一条线跑通。",
+  title: "Jasmine",
+  description: "穿搭博主和商户的 AI 内容生产、商单合作与商品上架平台。",
 };
 
 export default function RootLayout({
