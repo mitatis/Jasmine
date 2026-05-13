@@ -56,7 +56,6 @@ type DemoContextValue = {
   approveCollabRequest: (requestId: string) => void;
   addProduct: (product: Product) => void;
   addRequest: (request: RequestPost, post: Post) => void;
-  resetDemo: () => void;
 };
 
 const DemoContext = createContext<DemoContextValue | null>(null);
@@ -577,10 +576,6 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
           requests: [request, ...current.requests],
           posts: [post, ...current.posts],
         }));
-      },
-      resetDemo() {
-        setState(cloneSeedState());
-        toast.success("状态已重置。");
       },
     };
   }, [hydrated, state, storageReady, trackView]);

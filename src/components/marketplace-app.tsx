@@ -8,13 +8,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ChevronRight,
+  ExternalLink,
   Heart,
   LoaderCircle,
   Home,
   ImagePlus,
   Lock,
   Package,
-  RefreshCcw,
   Search,
   Shirt,
   ShoppingBag,
@@ -412,11 +412,11 @@ function LocalImageUploader({
 }
 
 function AppHeader({ mode }: { mode: AppMode }) {
-  const { resetDemo } = useDemo();
   const pathname = usePathname();
   const isSeller = mode === "seller";
   const [publishOpen, setPublishOpen] = useState(false);
   const creatorNav = [
+    { href: "/campaigns", label: "商单广场" },
     { href: "/creator", label: "AI内容台" },
     { href: "/products", label: "商城" },
     { href: "/community", label: "我的社区" },
@@ -497,22 +497,9 @@ function AppHeader({ mode }: { mode: AppMode }) {
                   </div>
                 </DialogContent>
               </Dialog>
-              <Link href="/creator" className={cn(buttonVariants({ variant: "outline" }), "hidden px-5 md:inline-flex")}>
-                <Sparkles data-icon="inline-start" />
-                AI 内容台
-              </Link>
             </>
           ) : null}
 
-          <Button
-            type="button"
-            variant="outline"
-            onClick={resetDemo}
-            className="hidden h-11 shrink-0 rounded-full bg-white px-4 text-sm lg:inline-flex"
-          >
-            <RefreshCcw data-icon="inline-start" />
-            重置
-          </Button>
           <Link href={isSeller ? "/" : "/seller"} className={cn(buttonVariants({ variant: "outline" }), "hidden h-11 shrink-0 rounded-full px-4 lg:inline-flex")}>
             {isSeller ? <Home data-icon="inline-start" /> : <Store data-icon="inline-start" />}
             {isSeller ? "选择入口" : "商户端"}
@@ -731,7 +718,7 @@ export function LandingPage() {
 
         <div className="grid gap-5">
           <Link
-            href="/creator"
+            href="/campaigns"
             className="group overflow-hidden rounded-[28px] border border-border/70 bg-white/96 shadow-[0_18px_50px_-34px_rgba(49,40,27,0.6)] transition hover:-translate-y-1 hover:shadow-[0_28px_70px_-38px_rgba(49,40,27,0.72)]"
           >
             <div className="grid gap-0 md:grid-cols-[0.9fr_1.1fr]">
@@ -741,7 +728,7 @@ export function LandingPage() {
                 <div>
                   <h2 className="text-4xl">AI 内容与商单广场</h2>
                   <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                    生成穿搭图文、短视频脚本和平台发布包，默认沉淀到我的社区，并把内容变成商单样张。
+                    先从商单广场挑选合作，再生成穿搭图文、短视频脚本和平台发布包。
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -749,9 +736,9 @@ export function LandingPage() {
                   <Badge variant="secondary">短视频脚本</Badge>
                   <Badge variant="secondary">商单匹配</Badge>
                 </div>
-                <Button className="rounded-full">
+                <span className={cn(buttonVariants(), "rounded-full")}>
                   进入博主端 <ArrowRight data-icon="inline-end" />
-                </Button>
+                </span>
               </div>
             </div>
           </Link>
@@ -774,9 +761,9 @@ export function LandingPage() {
                   <Badge variant="secondary">一键上架</Badge>
                   <Badge variant="secondary">博主推荐</Badge>
                 </div>
-                <Button variant="secondary" className="rounded-full">
+                <span className={cn(buttonVariants({ variant: "secondary" }), "rounded-full")}>
                   进入商户端 <ArrowRight data-icon="inline-end" />
-                </Button>
+                </span>
               </div>
               <img src={state.products[0]?.image ?? seedProducts[0].image} alt="商户商品工作台" className="h-72 w-full object-cover md:h-full" />
             </div>
@@ -1966,7 +1953,7 @@ export function PostDetailPage({ postId }: { postId: string }) {
         .sort((left, right) => right.similarityScore - left.similarityScore);
 
   if (!post) {
-    return <MissingScreen title="帖子不存在" description="这个帖子可能还没有发布，或已被重置。" />;
+    return <MissingScreen title="帖子不存在" description="这个帖子可能还没有发布，或已被下线。" />;
   }
 
   if (post.type === "buyer-request" && post.requestId) {
@@ -2190,7 +2177,7 @@ export function ProductDetailPage({ productId }: { productId: string }) {
       });
 
   if (!product) {
-    return <MissingScreen title="商品不存在" description="这个商品可能被重置了，回商城重新挑一件。" />;
+    return <MissingScreen title="商品不存在" description="这个商品可能已被下架，回商城重新挑一件。" />;
   }
 
   const activeProduct = product;
@@ -2888,7 +2875,7 @@ export function RequestDetailPage({ requestId }: { requestId: string }) {
   }, [requestId, trackView]);
 
   if (!request) {
-    return <MissingScreen title="征集帖不存在" description="可能已经被重置。回社区再发一次需求即可。" />;
+    return <MissingScreen title="征集帖不存在" description="可能还没有发布，回社区再发一次需求即可。" />;
   }
 
   return (
@@ -3254,6 +3241,106 @@ export function TryOnRoomPage() {
   );
 }
 
+export function CampaignsPage() {
+  const { state } = useDemo();
+  const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
+  const campaignBriefs = buildCampaignBriefs(state.products, state.sellers, currentBlogger);
+  const realFollowers = getCurrentUserFollowers(state.bloggers);
+  const receivedLikes = getBloggerPosts(state.posts, currentBlogger?.id ?? "blogger-me").reduce((sum, post) => sum + post.likes, 0);
+  const monetizationScore = Math.min(98, 62 + Math.floor(realFollowers.length / 120) + Math.floor(receivedLikes / 12));
+
+  return (
+    <LayoutFrame
+      mode="creator"
+      title="商单广场"
+      actions={
+        <>
+          <Link href="/creator" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Sparkles data-icon="inline-start" />
+            AI内容台
+          </Link>
+          <Link href="/me" className={cn(buttonVariants({ variant: "outline" }))}>
+            <Home data-icon="inline-start" />
+            我的
+          </Link>
+        </>
+      }
+    >
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none">
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-3xl">可接商单</CardTitle>
+                  <CardDescription>按商品和博主风格自动计算适配度与建议报价，粉丝门槛仅作为潜力提示。</CardDescription>
+                </div>
+                <Badge>{campaignBriefs.length} 个开放商单</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              {campaignBriefs.map((brief) => {
+                const product = resolveProduct(state.products, brief.productId);
+                const seller = resolveSeller(state.sellers, brief.sellerId);
+                if (!product) {
+                  return null;
+                }
+
+                return (
+                  <div key={brief.id} className="rounded-[24px] border border-border/70 bg-white p-4">
+                    <img src={product.image} alt={product.name} className="h-48 w-full rounded-[18px] object-cover" />
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{product.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {seller?.name ?? "商户"} · {formatShortDate(brief.deadline)} 截止
+                          </p>
+                        </div>
+                        <Badge>{brief.fitScore}% 适配</Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {brief.deliverables.map((item) => (
+                          <Badge key={item} variant="secondary">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="rounded-[18px] bg-secondary/60 px-4 py-3">
+                        <p className="text-xs text-muted-foreground">建议报价</p>
+                        <p className="mt-1 text-2xl font-semibold">{formatCurrency(brief.suggestedPrice)}</p>
+                      </div>
+                      <Link href={`/creator?productId=${product.id}`} className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+                        <Sparkles data-icon="inline-start" />
+                        用这个商单生成内容
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
+
+        <aside className="space-y-4">
+          <Card className="soft-panel border-0 bg-white/96 shadow-none lg:sticky lg:top-24">
+            <CardHeader>
+              <CardTitle>我的接单状态</CardTitle>
+              <CardDescription>用于判断当前账号的商单表现，不阻塞接单。</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <MetricCard label="变现潜力" value={`${monetizationScore}%`} />
+              <MetricCard label="平台粉丝" value={realFollowers.length.toString()} />
+              <MetricCard label="内容资产" value={getBloggerPosts(state.posts, currentBlogger?.id ?? "blogger-me").length.toString()} />
+              <MetricCard label="收到点赞" value={receivedLikes.toString()} />
+            </CardContent>
+          </Card>
+        </aside>
+      </section>
+    </LayoutFrame>
+  );
+}
+
 export function CreatorWorkspacePage() {
   const { state, publishUserPost, submitCollabRequest } = useDemo();
   const router = useRouter();
@@ -3376,18 +3463,6 @@ export function CreatorWorkspacePage() {
     router.push("/seller");
   }
 
-  function startCampaign(brief: CampaignBrief) {
-    const product = resolveProduct(state.products, brief.productId);
-    if (!product) {
-      return;
-    }
-
-    setSelectedProductId(product.id);
-    setFormat("image-post");
-    setPrompt(`围绕商单交付物：${brief.deliverables.join("、")}，突出 ${product.tags.slice(0, 3).join(" / ")}。`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
   return (
     <LayoutFrame
       mode="creator"
@@ -3433,22 +3508,33 @@ export function CreatorWorkspacePage() {
                     ))}
                   </select>
                 </label>
-                <label className="flex flex-col gap-2 text-sm">
+                <div className="flex flex-col gap-2 text-sm">
                   内容格式
-                  <ToggleGroup
-                    value={[format]}
-                    onValueChange={(value) => {
-                      const next = value[0] as GeneratedContentDraft["format"] | undefined;
-                      if (next) {
-                        setFormat(next);
-                      }
-                    }}
-                    className="justify-start"
-                  >
-                    <ToggleGroupItem value="image-post">AI图文</ToggleGroupItem>
-                    <ToggleGroupItem value="video-script">短视频脚本</ToggleGroupItem>
-                  </ToggleGroup>
-                </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ToggleGroup
+                      value={[format]}
+                      onValueChange={(value) => {
+                        const next = value[0] as GeneratedContentDraft["format"] | undefined;
+                        if (next) {
+                          setFormat(next);
+                        }
+                      }}
+                      className="justify-start"
+                    >
+                      <ToggleGroupItem value="image-post">AI图文</ToggleGroupItem>
+                      <ToggleGroupItem value="video-script">短视频脚本</ToggleGroupItem>
+                    </ToggleGroup>
+                    <Link
+                      href="https://jimeng.jianying.com/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full")}
+                    >
+                      <ExternalLink data-icon="inline-start" />
+                      一键生成视频
+                    </Link>
+                  </div>
+                </div>
               </div>
               <label className="flex flex-col gap-2 text-sm">
                 内容要求
@@ -3488,51 +3574,6 @@ export function CreatorWorkspacePage() {
             </CardFooter>
           </Card>
 
-          <Card className="soft-panel border-0 bg-white/96 shadow-none">
-            <CardHeader>
-              <CardTitle className="text-3xl">商单广场</CardTitle>
-              <CardDescription>按商品和博主风格自动计算适配度与建议报价，粉丝门槛仅作为潜力提示。</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              {campaignBriefs.map((brief) => {
-                const product = resolveProduct(state.products, brief.productId);
-                const seller = resolveSeller(state.sellers, brief.sellerId);
-                if (!product) {
-                  return null;
-                }
-
-                return (
-                  <div key={brief.id} className="rounded-[24px] border border-border/70 bg-white p-4">
-                    <img src={product.image} alt={product.name} className="h-48 w-full rounded-[18px] object-cover" />
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold">{product.name}</p>
-                          <p className="text-sm text-muted-foreground">{seller?.name ?? "商户"} · {formatShortDate(brief.deadline)} 截止</p>
-                        </div>
-                        <Badge>{brief.fitScore}% 适配</Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {brief.deliverables.map((item) => (
-                          <Badge key={item} variant="secondary">
-                            {item}
-                          </Badge>
-                        ))}
-                      </div>
-                      <div className="rounded-[18px] bg-secondary/60 px-4 py-3">
-                        <p className="text-xs text-muted-foreground">建议报价</p>
-                        <p className="mt-1 text-2xl font-semibold">{formatCurrency(brief.suggestedPrice)}</p>
-                      </div>
-                      <Button variant="outline" className="w-full" onClick={() => startCampaign(brief)}>
-                        <Sparkles data-icon="inline-start" />
-                        用这个商单生成内容
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
         </div>
 
         <aside className="space-y-4">
