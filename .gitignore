@@ -12,10 +12,14 @@
 
 # testing
 /coverage
+/apps/api/.pytest_cache/
+/apps/api/.coverage
 
 # next.js
 /.next/
+/apps/*/.next/
 /out/
+/apps/*/out/
 
 # production
 /build
@@ -32,6 +36,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +44,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local object/file storage
+/apps/api/.local-storage/
+
+# python
+__pycache__/
+*.py[cod]
+/.venv/
+/apps/api/.venv/

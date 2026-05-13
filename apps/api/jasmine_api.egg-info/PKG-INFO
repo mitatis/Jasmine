@@ -1,0 +1,20 @@
+Metadata-Version: 2.4
+Name: jasmine-api
+Version: 0.1.0
+Summary: FastAPI backend for the Jasmine B2B2C AI fashion campaign MVP.
+Requires-Python: >=3.12
+Requires-Dist: alembic>=1.17.2
+Requires-Dist: boto3>=1.42.0
+Requires-Dist: celery>=5.6.0
+Requires-Dist: email-validator>=2.3.0
+Requires-Dist: fastapi>=0.122.0
+Requires-Dist: httpx>=0.28.1
+Requires-Dist: passlib[bcrypt]>=1.7.4
+Requires-Dist: pillow>=12.0.0
+Requires-Dist: psycopg[binary]>=3.2.13
+Requires-Dist: pydantic-settings>=2.12.0
+Requires-Dist: pyjwt>=2.10.1
+Requires-Dist: python-multipart>=0.0.20
+Requires-Dist: redis>=7.1.0
+Requires-Dist: sqlalchemy>=2.0.44
+Requires-Dist: uvicorn[standard]>=0.38.0
