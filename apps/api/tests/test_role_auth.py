@@ -118,6 +118,94 @@ def test_role_permissions_reject_cross_role_write_access() -> None:
     assert merchant_org.json()["detail"] == "Merchant account required."
 
 
+def test_registration_bootstraps_default_role_resources() -> None:
+    client = TestClient(app)
+    merchant_token = _register(client, "merchant@example.com", "merchant", "Merchant User")
+    creator_token = _register(client, "creator@example.com", "creator", "Creator User")
+
+    brands = client.get("/api/v1/brands/me", headers={"Authorization": f"Bearer {merchant_token}"})
+    profiles = client.get("/api/v1/creators/me", headers={"Authorization": f"Bearer {creator_token}"})
+
+    assert brands.status_code == 200, brands.text
+    assert len(brands.json()) == 1
+    assert brands.json()[0]["brand_name"] == "Merchant User"
+    assert profiles.status_code == 200, profiles.text
+    assert len(profiles.json()) == 1
+    assert profiles.json()[0]["display_name"] == "Creator User"
+    assert profiles.json()[0]["visibility_settings"] == {
+        "business": "public",
+        "platforms": "public",
+        "stats": "public",
+        "assets": "private",
+    }
+    assert profiles.json()[0]["collaboration_info"]["contact_email"] == "creator@example.com"
+
+
+def test_creator_profile_owner_and_visitor_views_filter_private_fields() -> None:
+    client = TestClient(app)
+    owner_token = _register(client, "owner@example.com", "creator", "Owner Creator")
+    visitor_token = _register(client, "visitor@example.com", "creator", "Visitor Creator")
+
+    profiles = client.get("/api/v1/creators/me", headers={"Authorization": f"Bearer {owner_token}"})
+    assert profiles.status_code == 200, profiles.text
+    creator_id = profiles.json()[0]["id"]
+
+    asset = client.post(
+        f"/api/v1/creators/{creator_id}/assets",
+        json={
+            "asset_url": "https://example.com/portrait.png",
+            "asset_type": "portrait",
+            "usage_scope": "commercial",
+        },
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert asset.status_code == 200, asset.text
+
+    update = client.patch(
+        f"/api/v1/creators/{creator_id}",
+        json={
+            "platforms": {
+                "xhs": {"handle": "owner_xhs", "url": "https://xhs.example/owner", "linked": True},
+                "douyin": {"handle": "owner_dy", "url": "https://douyin.example/owner", "linked": True},
+            },
+            "collaboration_info": {
+                "contact_email": "collab@example.com",
+                "preferred_platforms": ["小红书", "抖音"],
+                "rate_card": {"image_post": 680, "video_script": 1200},
+                "categories": ["通勤极简", "夹克"],
+                "notes": "接受品牌寄样与内容共创。",
+            },
+            "visibility_settings": {
+                "business": "public",
+                "platforms": "private",
+                "stats": "public",
+                "assets": "private",
+            },
+        },
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert update.status_code == 200, update.text
+
+    owner_view = client.get(f"/api/v1/creators/{creator_id}", headers={"Authorization": f"Bearer {owner_token}"})
+    visitor_view = client.get(f"/api/v1/creators/{creator_id}", headers={"Authorization": f"Bearer {visitor_token}"})
+    owner_preview = client.get(
+        f"/api/v1/creators/{creator_id}?view=visitor",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert owner_view.status_code == 200, owner_view.text
+    assert owner_view.json()["platforms"]["xhs"]["handle"] == "owner_xhs"
+    assert owner_view.json()["collaboration_info"]["contact_email"] == "collab@example.com"
+    assert len(owner_view.json()["assets"]) == 1
+    assert visitor_view.status_code == 200, visitor_view.text
+    assert visitor_view.json()["display_name"] == "Owner Creator"
+    assert visitor_view.json()["platforms"] is None
+    assert visitor_view.json()["collaboration_info"]["contact_email"] == "collab@example.com"
+    assert visitor_view.json()["assets"] is None
+    assert owner_preview.status_code == 200, owner_preview.text
+    assert owner_preview.json() == visitor_view.json()
+
+
 def _register(client: TestClient, email: str, account_type: str, display_name: str) -> str:
     response = client.post(
         f"/api/v1/auth/{account_type}/register",

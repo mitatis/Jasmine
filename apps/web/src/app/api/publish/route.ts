@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import type { PublishDestination, PublishResult } from "@/lib/types";
 
 const destinationLabels: Record<PublishDestination, string> = {
-  community: "我的社区",
+  community: "内容资产库",
   douyin: "抖音",
   "xhs-miniapp": "小红书小程序挂载",
 };
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       return {
         destination,
         status: "published",
-        message: "已写入我的社区内容沉淀。",
+        message: "已写入内容资产库。",
       };
     }
 

@@ -1,5 +1,5 @@
-import { CommunityPage } from "@/components/marketplace-app";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <CommunityPage />;
+  redirect("/campaigns");
 }

@@ -7,6 +7,7 @@ import type {
   CampaignRead,
   CreatorAssetRead,
   CreatorProfileRead,
+  CreatorProfileUpdate,
   GenerationJobCreate,
   GenerationJobDetail,
   GenerationJobRead,
@@ -66,8 +67,12 @@ export const api = {
     request<ProductImageRead>(`/products/${productId}/images`, { method: "POST", body: JSON.stringify(payload) }),
   creators: () => request<CreatorProfileRead[]>("/creators"),
   myCreators: () => request<CreatorProfileRead[]>("/creators/me"),
+  creatorProfile: (creatorId: string, view?: "owner" | "visitor") =>
+    request<CreatorProfileRead>(`/creators/${creatorId}${view ? `?view=${view}` : ""}`),
   createCreator: (payload: Partial<CreatorProfileRead> & { display_name: string }) =>
     request<CreatorProfileRead>("/creators/profile", { method: "POST", body: JSON.stringify(payload) }),
+  updateCreator: (creatorId: string, payload: CreatorProfileUpdate) =>
+    request<CreatorProfileRead>(`/creators/${creatorId}`, { method: "PATCH", body: JSON.stringify(payload) }),
   addCreatorAsset: (creatorId: string, payload: Partial<CreatorAssetRead> & { asset_url: string; asset_type: string; usage_scope: string }) =>
     request<CreatorAssetRead>(`/creators/${creatorId}/assets`, { method: "POST", body: JSON.stringify(payload) }),
   addConsent: (creatorId: string, payload: { consent_type: string; allowed_brand_ids?: string[]; signed_text: string }) =>

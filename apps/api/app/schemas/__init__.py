@@ -78,6 +78,29 @@ class BrandRead(ORMModel):
     required_disclaimers: Any | None = None
 
 
+class CreatorAssetCreate(BaseModel):
+    asset_url: str
+    storage_key: str | None = None
+    asset_type: str
+    usage_scope: str
+    width: int | None = None
+    height: int | None = None
+    mime_type: str | None = None
+    quality_score: float | None = None
+
+
+class CreatorAssetRead(ORMModel):
+    id: str
+    creator_id: str
+    asset_url: str
+    asset_type: str
+    usage_scope: str
+    width: int | None = None
+    height: int | None = None
+    mime_type: str | None = None
+    quality_score: float | None = None
+
+
 class CreatorProfileCreate(BaseModel):
     org_id: str | None = None
     display_name: str
@@ -87,8 +110,25 @@ class CreatorProfileCreate(BaseModel):
     body_type: str | None = None
     style_tags: Any = Field(default_factory=list)
     platforms: dict[str, Any] = Field(default_factory=dict)
+    visibility_settings: dict[str, Any] | None = None
+    collaboration_info: dict[str, Any] | None = None
     content_examples: Any | None = None
     default_usage_scope: str = "tryon_only"
+
+
+class CreatorProfileUpdate(BaseModel):
+    org_id: str | None = None
+    display_name: str | None = None
+    bio: str | None = None
+    gender_presentation: str | None = None
+    height_cm: int | None = None
+    body_type: str | None = None
+    style_tags: Any | None = None
+    platforms: dict[str, Any] | None = None
+    visibility_settings: dict[str, Any] | None = None
+    collaboration_info: dict[str, Any] | None = None
+    content_examples: Any | None = None
+    default_usage_scope: str | None = None
 
 
 class CreatorProfileRead(ORMModel):
@@ -97,10 +137,17 @@ class CreatorProfileRead(ORMModel):
     org_id: str | None = None
     display_name: str
     bio: str | None = None
+    gender_presentation: str | None = None
+    height_cm: int | None = None
+    body_type: str | None = None
     style_tags: Any
-    platforms: Any
+    platforms: Any | None = None
+    visibility_settings: Any | None = None
+    collaboration_info: Any | None = None
+    content_examples: Any | None = None
     consent_status: str
     default_usage_scope: str
+    assets: list[CreatorAssetRead] | None = None
 
 
 class ConsentCreate(BaseModel):
@@ -168,29 +215,6 @@ class ProductImageRead(ORMModel):
     height: int | None = None
     mime_type: str | None = None
     is_primary: bool
-
-
-class CreatorAssetCreate(BaseModel):
-    asset_url: str
-    storage_key: str | None = None
-    asset_type: str
-    usage_scope: str
-    width: int | None = None
-    height: int | None = None
-    mime_type: str | None = None
-    quality_score: float | None = None
-
-
-class CreatorAssetRead(ORMModel):
-    id: str
-    creator_id: str
-    asset_url: str
-    asset_type: str
-    usage_scope: str
-    width: int | None = None
-    height: int | None = None
-    mime_type: str | None = None
-    quality_score: float | None = None
 
 
 class CampaignCreate(BaseModel):

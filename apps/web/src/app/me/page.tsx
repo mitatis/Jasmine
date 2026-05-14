@@ -1,10 +1,10 @@
 import { RoleGate } from "@/components/auth/role-gate";
-import { MePage } from "@/components/marketplace-app";
+import { CreatorMeProfilePage } from "@/components/creator-profile-page";
 
 export default function Page() {
   return (
     <RoleGate accountType="creator">
-      <MePage />
+      <CreatorMeProfilePage />
     </RoleGate>
   );
 }

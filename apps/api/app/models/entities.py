@@ -93,6 +93,8 @@ class CreatorProfile(Base, TimestampMixin):
     body_type: Mapped[str | None] = mapped_column(String(128))
     style_tags: Mapped[list | dict] = mapped_column(JSON, default=list)
     platforms: Mapped[dict] = mapped_column(JSON, default=dict)
+    visibility_settings: Mapped[dict | None] = mapped_column(JSON)
+    collaboration_info: Mapped[dict | None] = mapped_column(JSON)
     content_examples: Mapped[list | dict | None] = mapped_column(JSON)
     consent_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     default_usage_scope: Mapped[str] = mapped_column(String(64), default="tryon_only", nullable=False)

@@ -274,11 +274,33 @@ export type CreatorProfileRead = {
   org_id?: string | null;
   display_name: string;
   bio?: string | null;
+  gender_presentation?: string | null;
+  height_cm?: number | null;
+  body_type?: string | null;
   style_tags: unknown;
-  platforms: unknown;
+  platforms?: unknown | null;
+  visibility_settings?: unknown | null;
+  collaboration_info?: unknown | null;
+  content_examples?: unknown | null;
   consent_status: "pending" | "active" | "revoked";
   default_usage_scope: "tryon_only" | "commercial_campaign" | "full_ai_generation";
+  assets?: CreatorAssetRead[] | null;
 };
+
+export type CreatorProfileUpdate = Partial<{
+  org_id: string | null;
+  display_name: string;
+  bio: string | null;
+  gender_presentation: string | null;
+  height_cm: number | null;
+  body_type: string | null;
+  style_tags: unknown;
+  platforms: Record<string, unknown>;
+  visibility_settings: Record<string, "public" | "private">;
+  collaboration_info: Record<string, unknown>;
+  content_examples: unknown;
+  default_usage_scope: string;
+}>;
 
 export type CreatorAssetRead = {
   id: string;

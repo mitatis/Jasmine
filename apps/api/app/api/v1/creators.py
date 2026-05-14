@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -8,7 +9,20 @@ from app.api.deps import get_current_user
 from app.core.permissions import require_creator_user
 from app.db.session import get_db
 from app.models.entities import ConsentRecord, CreatorAsset, CreatorProfile, User
-from app.schemas import ConsentCreate, ConsentRead, CreatorAssetCreate, CreatorAssetRead, CreatorProfileCreate, CreatorProfileRead
+from app.schemas import (
+    ConsentCreate,
+    ConsentRead,
+    CreatorAssetCreate,
+    CreatorAssetRead,
+    CreatorProfileCreate,
+    CreatorProfileRead,
+    CreatorProfileUpdate,
+)
+from app.services.creator_profiles import (
+    creator_profile_payload,
+    normalize_collaboration_info,
+    normalize_visibility_settings,
+)
 
 router = APIRouter(tags=["creators"])
 
@@ -22,7 +36,10 @@ def list_creators(db: Session = Depends(get_db), user: User = Depends(get_curren
 @router.post("/creators/profile", response_model=CreatorProfileRead)
 def create_profile(payload: CreatorProfileCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> CreatorProfile:
     require_creator_user(user)
-    profile = CreatorProfile(user_id=user.id, **payload.model_dump())
+    data = payload.model_dump()
+    data["visibility_settings"] = normalize_visibility_settings(data.get("visibility_settings"))
+    data["collaboration_info"] = normalize_collaboration_info(data.get("collaboration_info"), contact_email=user.email)
+    profile = CreatorProfile(user_id=user.id, **data)
     db.add(profile)
     db.commit()
     db.refresh(profile)
@@ -35,16 +52,49 @@ def my_profiles(db: Session = Depends(get_db), user: User = Depends(get_current_
     return list(db.scalars(select(CreatorProfile).where(CreatorProfile.user_id == user.id)))
 
 
+@router.get("/creators/{creator_id}", response_model=CreatorProfileRead)
+def get_profile(
+    creator_id: str,
+    view: Literal["owner", "visitor"] | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    profile = db.get(CreatorProfile, creator_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Creator profile not found.")
+    is_owner = profile.user_id == user.id
+    return creator_profile_payload(profile, owner=is_owner, force_visitor=view == "visitor")
+
+
 @router.patch("/creators/{creator_id}", response_model=CreatorProfileRead)
-def update_profile(creator_id: str, payload: CreatorProfileCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> CreatorProfile:
+def update_profile(
+    creator_id: str,
+    payload: CreatorProfileUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
     require_creator_user(user)
     profile = _creator_for_user(db, creator_id, user)
-    for key, value in payload.model_dump().items():
+    data = payload.model_dump(exclude_unset=True)
+    if "visibility_settings" in data:
+        data["visibility_settings"] = normalize_visibility_settings(data["visibility_settings"])
+    if "collaboration_info" in data:
+        data["collaboration_info"] = normalize_collaboration_info(
+            {
+                **(profile.collaboration_info or {}),
+                **(data["collaboration_info"] or {}),
+            },
+            contact_email=user.email,
+        )
+
+    for key, value in data.items():
+        if key == "display_name" and value is None:
+            continue
         setattr(profile, key, value)
     db.add(profile)
     db.commit()
     db.refresh(profile)
-    return profile
+    return creator_profile_payload(profile, owner=True)
 
 
 @router.post("/creators/{creator_id}/assets", response_model=CreatorAssetRead)

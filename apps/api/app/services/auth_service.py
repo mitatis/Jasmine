@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.entities import BrandProfile, CreatorProfile, OrgMembership, Organization, User
+from app.services.creator_profiles import default_collaboration_info, default_visibility_settings
 
 
 AccountType = Literal["merchant", "creator"]
@@ -86,5 +87,7 @@ def _bootstrap_account(db: Session, *, user: User) -> None:
             bio="Jasmine creator account",
             style_tags=[],
             platforms={},
+            visibility_settings=default_visibility_settings(),
+            collaboration_info=default_collaboration_info(user.email),
         )
     )

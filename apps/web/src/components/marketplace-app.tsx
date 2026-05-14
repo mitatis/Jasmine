@@ -4,7 +4,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   ChevronRight,
@@ -16,7 +16,6 @@ import {
   Lock,
   Package,
   Search,
-  Shirt,
   ShoppingBag,
   Sparkles,
   Star,
@@ -109,13 +108,13 @@ const sectionTitles: Record<ProfileSectionKey, string> = {
 };
 
 const destinationLabels: Record<PublishDestination, string> = {
-  community: "我的社区",
+  community: "内容资产库",
   douyin: "抖音",
   "xhs-miniapp": "小红书小程序挂载",
 };
 
 const destinationDescriptions: Record<PublishDestination, string> = {
-  community: "默认沉淀到站内内容池",
+  community: "默认沉淀到内容资产库",
   douyin: "待开放平台应用授权后发布",
   "xhs-miniapp": "通过小程序/商品挂载承接",
 };
@@ -222,6 +221,23 @@ function buildCampaignBriefs(products: Product[], sellers: Seller[], blogger: Bl
       status: "open",
     };
   });
+}
+
+const colorKeywords = ["黑色", "白", "象牙", "沙色", "橄榄", "蓝", "灰", "大地色", "黑白灰"];
+const clothingTypeKeywords = ["夹克", "外套", "西装", "针织", "风衣", "牛仔", "飞行夹克", "短款夹克"];
+
+function inferColorAttributes(product: Product) {
+  const text = [product.name, product.material, ...product.tags].join(" ");
+  return colorKeywords.filter((keyword) => text.includes(keyword));
+}
+
+function inferClothingTypes(product: Product) {
+  const text = [product.name, ...product.tags].join(" ");
+  return clothingTypeKeywords.filter((keyword) => text.includes(keyword));
+}
+
+function uniqueOptions(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 const hotStyles = ["通勤极简", "高街暗黑", "美式复古", "Clean Fit", "韩系宽松", "针织", "牛仔", "风衣"];
@@ -418,13 +434,11 @@ function AppHeader({ mode }: { mode: AppMode }) {
   const creatorNav = [
     { href: "/campaigns", label: "商单广场" },
     { href: "/creator", label: "AI内容台" },
-    { href: "/products", label: "商城" },
-    { href: "/community", label: "我的社区" },
+    { href: "/me", label: "我的" },
   ];
   const sellerNav = [
     { href: "/seller", label: "商户工作台" },
     { href: "/seller/products", label: "商品" },
-    { href: "/community", label: "内容社区" },
   ];
 
   return (
@@ -432,7 +446,7 @@ function AppHeader({ mode }: { mode: AppMode }) {
       <div className="page-shell grid items-center gap-4 py-4 lg:grid-cols-[220px_minmax(180px,1fr)_minmax(520px,max-content)] xl:grid-cols-[250px_minmax(260px,1fr)_minmax(620px,max-content)]">
         <div className="flex items-center gap-3">
           <div>
-            <Link href="/" className="font-heading text-4xl leading-none tracking-[-0.05em]">
+            <Link href={isSeller ? "/seller" : "/campaigns"} className="font-heading text-4xl leading-none tracking-[-0.05em]">
               Jasmine
             </Link>
             <p className="mt-1 text-xs tracking-[0.18em] text-muted-foreground">
@@ -500,9 +514,9 @@ function AppHeader({ mode }: { mode: AppMode }) {
             </>
           ) : null}
 
-          <Link href={isSeller ? "/" : "/seller"} className={cn(buttonVariants({ variant: "outline" }), "hidden h-11 shrink-0 rounded-full px-4 lg:inline-flex")}>
+          <Link href="/" className={cn(buttonVariants({ variant: "outline" }), "hidden h-11 shrink-0 rounded-full px-4 lg:inline-flex")}>
             {isSeller ? <Home data-icon="inline-start" /> : <Store data-icon="inline-start" />}
-            {isSeller ? "选择入口" : "商户端"}
+            {isSeller ? "切换博主" : "切换商家"}
           </Link>
           <StatusSheet mode={mode} />
         </div>
@@ -2455,8 +2469,8 @@ export function SellPage() {
         body: JSON.stringify({ productId: createdProduct.id, draft }),
       });
       publishSellerPost(createdProduct, draft);
-      toast.success("内容已发布到社区沉淀页。");
-      router.push("/community");
+      toast.success("内容已保存到商品素材库。");
+      router.push("/seller");
     } finally {
       setSubmitting(false);
     }
@@ -2482,10 +2496,6 @@ export function SellPage() {
           <Link href="/seller/products" className={cn(buttonVariants({ variant: "outline" }))}>
             <Package data-icon="inline-start" />
             商品
-          </Link>
-          <Link href="/community" className={cn(buttonVariants({ variant: "outline" }))}>
-            <Shirt data-icon="inline-start" />
-            内容社区
           </Link>
           <Link href="/creator" className={cn(buttonVariants({ variant: "outline" }))}>
             <Home data-icon="inline-start" />
@@ -3245,25 +3255,110 @@ export function CampaignsPage() {
   const { state } = useDemo();
   const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
   const campaignBriefs = buildCampaignBriefs(state.products, state.sellers, currentBlogger);
+  const [styleFilter, setStyleFilter] = useState("all");
+  const [colorFilter, setColorFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sortMode, setSortMode] = useState<"recommended" | "fit" | "price">("recommended");
   const realFollowers = getCurrentUserFollowers(state.bloggers);
   const receivedLikes = getBloggerPosts(state.posts, currentBlogger?.id ?? "blogger-me").reduce((sum, post) => sum + post.likes, 0);
   const monetizationScore = Math.min(98, 62 + Math.floor(realFollowers.length / 120) + Math.floor(receivedLikes / 12));
+  const campaignCards = useMemo(() => {
+    return campaignBriefs
+      .map((brief, index) => {
+        const product = resolveProduct(state.products, brief.productId);
+        if (!product) {
+          return null;
+        }
+
+        return {
+          brief,
+          product,
+          seller: resolveSeller(state.sellers, brief.sellerId),
+          colors: inferColorAttributes(product),
+          clothingTypes: inferClothingTypes(product),
+          order: index,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .filter((item) => styleFilter === "all" || item.product.tags.includes(styleFilter))
+      .filter((item) => colorFilter === "all" || item.colors.includes(colorFilter))
+      .filter((item) => typeFilter === "all" || item.clothingTypes.includes(typeFilter))
+      .sort((left, right) => {
+        if (sortMode === "fit") {
+          return right.brief.fitScore - left.brief.fitScore;
+        }
+        if (sortMode === "price") {
+          return right.brief.suggestedPrice - left.brief.suggestedPrice;
+        }
+        return left.order - right.order;
+      });
+  }, [campaignBriefs, colorFilter, sortMode, state.products, state.sellers, styleFilter, typeFilter]);
+  const styleOptions = uniqueOptions(campaignBriefs.flatMap((brief) => resolveProduct(state.products, brief.productId)?.tags ?? []));
+  const colorOptions = uniqueOptions(campaignBriefs.flatMap((brief) => {
+    const product = resolveProduct(state.products, brief.productId);
+    return product ? inferColorAttributes(product) : [];
+  }));
+  const typeOptions = uniqueOptions(campaignBriefs.flatMap((brief) => {
+    const product = resolveProduct(state.products, brief.productId);
+    return product ? inferClothingTypes(product) : [];
+  }));
 
   return (
     <LayoutFrame
       mode="creator"
       title="商单广场"
       actions={
-        <>
-          <Link href="/creator" className={cn(buttonVariants({ variant: "outline" }))}>
-            <Sparkles data-icon="inline-start" />
-            AI内容台
-          </Link>
-          <Link href="/me" className={cn(buttonVariants({ variant: "outline" }))}>
-            <Home data-icon="inline-start" />
-            我的
-          </Link>
-        </>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <select
+            aria-label="筛选风格"
+            value={styleFilter}
+            onChange={(event) => setStyleFilter(event.target.value)}
+            className="h-10 rounded-full border border-input bg-white px-3 text-sm"
+          >
+            <option value="all">全部风格</option>
+            {styleOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="筛选颜色"
+            value={colorFilter}
+            onChange={(event) => setColorFilter(event.target.value)}
+            className="h-10 rounded-full border border-input bg-white px-3 text-sm"
+          >
+            <option value="all">全部颜色</option>
+            {colorOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="筛选衣服类型"
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value)}
+            className="h-10 rounded-full border border-input bg-white px-3 text-sm"
+          >
+            <option value="all">全部类型</option>
+            {typeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="排序"
+            value={sortMode}
+            onChange={(event) => setSortMode(event.target.value as typeof sortMode)}
+            className="h-10 rounded-full border border-input bg-white px-3 text-sm"
+          >
+            <option value="recommended">推荐排序</option>
+            <option value="fit">按适配度</option>
+            <option value="price">按报价</option>
+          </select>
+        </div>
       }
     >
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -3279,45 +3374,38 @@ export function CampaignsPage() {
               </div>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-2">
-              {campaignBriefs.map((brief) => {
-                const product = resolveProduct(state.products, brief.productId);
-                const seller = resolveSeller(state.sellers, brief.sellerId);
-                if (!product) {
-                  return null;
-                }
-
-                return (
-                  <div key={brief.id} className="rounded-[24px] border border-border/70 bg-white p-4">
-                    <img src={product.image} alt={product.name} className="h-48 w-full rounded-[18px] object-cover" />
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold">{product.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {seller?.name ?? "商户"} · {formatShortDate(brief.deadline)} 截止
-                          </p>
-                        </div>
-                        <Badge>{brief.fitScore}% 适配</Badge>
+              {campaignCards.map(({ brief, product, seller }) => (
+                <div key={brief.id} className="rounded-[24px] border border-border/70 bg-white p-4">
+                  <img src={product.image} alt={product.name} className="h-48 w-full rounded-[18px] object-cover" />
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{product.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {seller?.name ?? "商户"} · {formatShortDate(brief.deadline)} 截止
+                        </p>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {brief.deliverables.map((item) => (
-                          <Badge key={item} variant="secondary">
-                            {item}
-                          </Badge>
-                        ))}
-                      </div>
-                      <div className="rounded-[18px] bg-secondary/60 px-4 py-3">
-                        <p className="text-xs text-muted-foreground">建议报价</p>
-                        <p className="mt-1 text-2xl font-semibold">{formatCurrency(brief.suggestedPrice)}</p>
-                      </div>
-                      <Link href={`/creator?productId=${product.id}`} className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
-                        <Sparkles data-icon="inline-start" />
-                        用这个商单生成内容
-                      </Link>
+                      <Badge>{brief.fitScore}% 适配</Badge>
                     </div>
+                    <div className="flex flex-wrap gap-2">
+                      {brief.deliverables.map((item) => (
+                        <Badge key={item} variant="secondary">
+                          {item}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="rounded-[18px] bg-secondary/60 px-4 py-3">
+                      <p className="text-xs text-muted-foreground">建议报价</p>
+                      <p className="mt-1 text-2xl font-semibold">{formatCurrency(brief.suggestedPrice)}</p>
+                    </div>
+                    <Link href={`/creator?campaignId=${brief.id}&productId=${product.id}`} className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+                      <Sparkles data-icon="inline-start" />
+                      用这个商单生成内容
+                    </Link>
                   </div>
-                );
-              })}
+                </div>
+              ))}
+              {!campaignCards.length ? <EmptyState label="没有符合当前筛选条件的商单。" /> : null}
             </CardContent>
           </Card>
         </div>
@@ -3346,6 +3434,7 @@ export function CreatorWorkspacePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentBlogger = resolveBlogger(state.bloggers, "blogger-me") ?? state.bloggers[0];
+  const campaignId = searchParams.get("campaignId");
   const initialProductId = searchParams.get("productId") ?? state.products[0]?.id ?? "";
   const [selectedProductId, setSelectedProductId] = useState(initialProductId);
   const [format, setFormat] = useState<GeneratedContentDraft["format"]>(
@@ -3359,6 +3448,19 @@ export function CreatorWorkspacePage() {
   const selectedProduct = resolveProduct(state.products, selectedProductId) ?? state.products[0];
   const selectedSeller = resolveSeller(state.sellers, selectedProduct?.sellerId);
   const campaignBriefs = buildCampaignBriefs(state.products, state.sellers, currentBlogger);
+  const activeCampaignBrief = campaignId ? campaignBriefs.find((brief) => brief.id === campaignId && brief.productId === selectedProduct?.id) ?? null : null;
+  const suggestedCampaignBrief = activeCampaignBrief ?? campaignBriefs.find((brief) => brief.productId === selectedProduct?.id) ?? campaignBriefs[0] ?? null;
+  const relatedCampaignBriefs = campaignBriefs
+    .filter((brief) => brief.id !== suggestedCampaignBrief?.id)
+    .sort((left, right) => {
+      const leftProduct = resolveProduct(state.products, left.productId);
+      const rightProduct = resolveProduct(state.products, right.productId);
+      const leftOverlap = leftProduct?.tags.filter((tag) => selectedProduct?.tags.includes(tag)).length ?? 0;
+      const rightOverlap = rightProduct?.tags.filter((tag) => selectedProduct?.tags.includes(tag)).length ?? 0;
+      return rightOverlap - leftOverlap || right.fitScore - left.fitScore;
+    })
+    .slice(0, 3);
+  const hasCampaignContext = Boolean(activeCampaignBrief);
   const realFollowers = getCurrentUserFollowers(state.bloggers);
   const receivedLikes = getBloggerPosts(state.posts, currentBlogger?.id ?? "blogger-me").reduce((sum, post) => sum + post.likes, 0);
   const monetizationScore = Math.min(98, 62 + Math.floor(realFollowers.length / 120) + Math.floor(receivedLikes / 12));
@@ -3446,9 +3548,13 @@ export function CreatorWorkspacePage() {
       toast.error("请先生成商单内容草稿。");
       return;
     }
+    if (!activeCampaignBrief) {
+      toast.error("请先从商单进入内容台，或在推荐商单里选择一个合作。");
+      return;
+    }
 
-    const fitScore = campaignBriefs.find((brief) => brief.productId === selectedProduct.id)?.fitScore ?? 88;
-    const suggestedPrice = campaignBriefs.find((brief) => brief.productId === selectedProduct.id)?.suggestedPrice ?? 360;
+    const fitScore = activeCampaignBrief.fitScore;
+    const suggestedPrice = activeCampaignBrief.suggestedPrice;
     submitCollabRequest({
       sellerId: selectedProduct.sellerId,
       productId: selectedProduct.id,
@@ -3467,18 +3573,6 @@ export function CreatorWorkspacePage() {
     <LayoutFrame
       mode="creator"
       title="博主 AI 内容工作台"
-      actions={
-        <>
-          <Link href="/community" className={cn(buttonVariants({ variant: "outline" }))}>
-            <Shirt data-icon="inline-start" />
-            我的社区
-          </Link>
-          <Link href="/products" className={cn(buttonVariants({ variant: "outline" }))}>
-            <ShoppingCart data-icon="inline-start" />
-            商城
-          </Link>
-        </>
-      }
     >
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="space-y-6">
@@ -3487,7 +3581,7 @@ export function CreatorWorkspacePage() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <CardTitle className="text-3xl">AI 内容生成</CardTitle>
-                  <CardDescription>先选商品，再生成图文或短视频脚本；我的社区默认开启，用于沉淀内容资产。</CardDescription>
+                  <CardDescription>先选商品，再生成图文或短视频脚本；内容资产库默认开启，用于沉淀内容资产。</CardDescription>
                 </div>
                 <Badge>{monetizationScore}% 变现潜力</Badge>
               </div>
@@ -3614,9 +3708,57 @@ export function CreatorWorkspacePage() {
                   ))}
                 </div>
               ) : null}
-              <Button variant="outline" onClick={sendDraftToSeller} disabled={!draft} className="w-full">
+              <div className="rounded-[18px] border border-border/70 bg-secondary/40 p-4">
+                {hasCampaignContext && activeCampaignBrief ? (
+                  <>
+                    <p className="text-sm font-semibold">当前商单</p>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <MetricCard label="适配度" value={`${activeCampaignBrief.fitScore}%`} />
+                      <MetricCard label="预计收益" value={formatCurrency(activeCampaignBrief.suggestedPrice)} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold">建议关联商单</p>
+                    {suggestedCampaignBrief ? (
+                      <div className="mt-3 rounded-[16px] bg-white p-3 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium">{resolveProduct(state.products, suggestedCampaignBrief.productId)?.name ?? "推荐商单"}</span>
+                          <Badge>{suggestedCampaignBrief.fitScore}% 适配</Badge>
+                        </div>
+                        <p className="mt-2 text-muted-foreground">预计收益 {formatCurrency(suggestedCampaignBrief.suggestedPrice)}</p>
+                        <Link
+                          href={`/creator?campaignId=${suggestedCampaignBrief.id}&productId=${suggestedCampaignBrief.productId}`}
+                          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-3 w-full")}
+                        >
+                          关联这个商单
+                        </Link>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+              {!hasCampaignContext && relatedCampaignBriefs.length ? (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold">类似商单</p>
+                  {relatedCampaignBriefs.map((brief) => (
+                    <Link
+                      key={brief.id}
+                      href={`/creator?campaignId=${brief.id}&productId=${brief.productId}`}
+                      className="block rounded-[16px] border border-border/70 bg-white p-3 text-sm transition hover:bg-secondary/50"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">{resolveProduct(state.products, brief.productId)?.name ?? "商单"}</span>
+                        <Badge>{brief.fitScore}%</Badge>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">预计收益 {formatCurrency(brief.suggestedPrice)}</p>
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+              <Button variant="outline" onClick={sendDraftToSeller} disabled={!draft || !hasCampaignContext} className="w-full">
                 <Store data-icon="inline-start" />
-                发送给商户确认合作
+                {hasCampaignContext ? "发送给商户确认合作" : "先关联商单后发送"}
               </Button>
             </CardContent>
           </Card>
