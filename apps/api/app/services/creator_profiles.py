@@ -14,7 +14,16 @@ DEFAULT_COLLABORATION_INFO = {
     "contact_email": "",
     "preferred_platforms": [],
     "rate_card": {},
+    "quote_range": {"min": 0, "max": 0},
     "categories": [],
+    "style_preferences": [],
+    "content_strengths": {
+        "visual_style": 60,
+        "engagement": 60,
+        "conversion": 60,
+        "video": 60,
+        "delivery": 60,
+    },
     "notes": "",
 }
 

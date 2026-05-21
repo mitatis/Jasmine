@@ -139,6 +139,16 @@ def test_registration_bootstraps_default_role_resources() -> None:
         "assets": "private",
     }
     assert profiles.json()[0]["collaboration_info"]["contact_email"] == "creator@example.com"
+    assert profiles.json()[0]["collaboration_info"]["quote_range"] == {"min": 0, "max": 0}
+    assert profiles.json()[0]["collaboration_info"]["style_preferences"] == []
+    assert profiles.json()[0]["collaboration_info"]["content_strengths"] == {
+        "visual_style": 60,
+        "engagement": 60,
+        "conversion": 60,
+        "video": 60,
+        "delivery": 60,
+    }
+    assert profiles.json()[0]["content_examples"] == []
 
 
 def test_creator_profile_owner_and_visitor_views_filter_private_fields() -> None:

@@ -112,7 +112,7 @@ class CreatorProfileCreate(BaseModel):
     platforms: dict[str, Any] = Field(default_factory=dict)
     visibility_settings: dict[str, Any] | None = None
     collaboration_info: dict[str, Any] | None = None
-    content_examples: Any | None = None
+    content_examples: Any = Field(default_factory=list)
     default_usage_scope: str = "tryon_only"
 
 

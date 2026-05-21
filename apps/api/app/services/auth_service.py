@@ -89,5 +89,6 @@ def _bootstrap_account(db: Session, *, user: User) -> None:
             platforms={},
             visibility_settings=default_visibility_settings(),
             collaboration_info=default_collaboration_info(user.email),
+            content_examples=[],
         )
     )
